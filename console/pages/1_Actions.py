@@ -49,6 +49,7 @@ st.dataframe(
             "outil": r["tool"],
             "action": r["action"],
             "ressource": r["resource_id"],
+            "destinataire": r["recipient"],
             "verdict": r["verdict"],
             "statut": r["status"],
             "règles": r["rule_ids"],

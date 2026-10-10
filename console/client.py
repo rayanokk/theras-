@@ -25,6 +25,27 @@ DEFAULT_DB_PATH = "police.db"
 DEFAULT_GATEWAY_URL = "http://localhost:8000"
 
 
+class DecideError(Exception):
+    """Erreur de décision, avec un message clair prêt à afficher."""
+
+
+# Traduction des codes d'erreur du contrat 5 en messages lisibles.
+_DECIDE_HTTP_MESSAGES = {
+    401: "Clé inconnue.",
+    403: "Cette clé n'a pas le rôle d'approbateur.",
+    409: "Décision déjà prise pour cette approbation.",
+    410: "Approbation expirée.",
+    422: "Justification invalide (10 caractères minimum).",
+}
+
+
+def _decide_message_for_status(status_code: int) -> str:
+    """Message clair pour un code HTTP de /decide."""
+    return _DECIDE_HTTP_MESSAGES.get(
+        status_code, f"Erreur du Gateway (HTTP {status_code})."
+    )
+
+
 class ConsoleClient(Protocol):
     """Interface de lecture/décision pour la console."""
 
@@ -43,23 +64,50 @@ class ConsoleClient(Protocol):
     def decide(self, approval_id: str, decision: str, justification: str) -> dict: ...
 
 
-_ROW_FIELDS = (
-    "action_id",
-    "agent_id",
-    "tool",
-    "action",
-    "resource_id",
-    "verdict",
-    "status",
-    "rule_ids",
-)
+def _recipient_from_params(parameters: dict) -> str | None:
+    """Destinataire : recipient (partage) ou to (mail), None sinon."""
+    if not isinstance(parameters, dict):
+        return None
+    return parameters.get("recipient") or parameters.get("to")
 
 
 def _action_to_row(action: dict) -> dict:
-    """Ligne d'affichage pour le tableau (champs non portés par Decision)."""
-    row = {k: action.get(k) for k in _ROW_FIELDS}
-    row["rule_ids"] = ", ".join(action.get("rule_ids", []))
-    return row
+    """Ligne d'affichage pour le tableau.
+
+    Lit tool/action/resource_id/user_id/reason/recipient depuis `request`
+    (format Gateway), avec repli sur l'ancien format à plat. Expose aussi
+    reason et taint_sources."""
+    request = action.get("request")
+    if isinstance(request, dict):
+        tool = request.get("tool")
+        act = request.get("action")
+        resource_id = request.get("resource_id")
+        user_id = request.get("user_id")
+        reason = request.get("reason")
+        recipient = _recipient_from_params(request.get("parameters", {}))
+    else:
+        # Repli : ancien format à plat.
+        tool = action.get("tool")
+        act = action.get("action")
+        resource_id = action.get("resource_id")
+        user_id = action.get("user_id")
+        reason = action.get("reason")
+        recipient = _recipient_from_params(action.get("params", {}))
+
+    return {
+        "action_id": action.get("action_id"),
+        "agent_id": action.get("agent_id"),
+        "tool": tool,
+        "action": act,
+        "resource_id": resource_id,
+        "user_id": user_id,
+        "reason": reason,
+        "recipient": recipient,
+        "verdict": action.get("verdict"),
+        "status": action.get("status"),
+        "rule_ids": ", ".join(action.get("rule_ids", [])),
+        "taint_sources": action.get("taint_sources", []),
+    }
 
 
 def _action_to_decision(action: dict) -> Decision:
@@ -127,7 +175,10 @@ class HttpClient:
     """Appelle les routes du Gateway avec httpx et le header X-API-Key."""
 
     def __init__(
-        self, base_url: str | None = None, api_key: str | None = None
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        transport=None,
     ) -> None:
         import httpx
 
@@ -135,10 +186,12 @@ class HttpClient:
             base_url or os.environ.get(ENV_GATEWAY_URL, DEFAULT_GATEWAY_URL)
         ).rstrip("/")
         self._api_key = api_key or os.environ.get(ENV_APPROVER_KEY, "")
+        # transport injectable (ex. httpx.MockTransport) pour les tests.
         self._client = httpx.Client(
             base_url=self._base_url,
             headers={"X-API-Key": self._api_key},
             timeout=10.0,
+            transport=transport,
         )
 
     def list_actions(self, status: str | None = None) -> list[Decision]:
@@ -148,26 +201,12 @@ class HttpClient:
         return [Decision.model_validate(item) for item in resp.json()]
 
     def list_action_rows(self, status: str | None = None) -> list[dict]:
-        # L'API renvoie des Decision ; agent/outil/action/ressource ne sont pas
-        # dans le contrat 2, donc indisponibles en mode http.
+        # L'API renvoie les actions au format Gateway (request imbriqué) ;
+        # _action_to_row sait en extraire outil/action/ressource/destinataire.
         params = {"status": status} if status else None
         resp = self._client.get("/v1/actions", params=params)
         resp.raise_for_status()
-        rows = []
-        for item in resp.json():
-            rows.append(
-                {
-                    "action_id": item.get("action_id"),
-                    "agent_id": None,
-                    "tool": None,
-                    "action": None,
-                    "resource_id": None,
-                    "verdict": item.get("verdict"),
-                    "status": item.get("status"),
-                    "rule_ids": ", ".join(item.get("rule_ids", [])),
-                }
-            )
-        return rows
+        return [_action_to_row(item) for item in resp.json()]
 
     def list_events(self, action_id: str | None = None) -> list[Event]:
         params = {"action_id": action_id} if action_id else None
@@ -195,7 +234,8 @@ class HttpClient:
             f"/v1/approvals/{approval_id}/decide",
             json={"decision": decision, "justification": justification},
         )
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            raise DecideError(_decide_message_for_status(resp.status_code))
         return resp.json()
 
     def close(self) -> None:
