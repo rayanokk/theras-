@@ -72,3 +72,12 @@ def test_json_invalide_rejete(text):
 def test_json_entoure_de_balises_accepte():
     out = _parse('```json\n{"score": 0.4, "signals": ["a"], "summary": "ok"}\n```')
     assert out.score == 0.4
+
+
+def test_modele_risque_vide_donne_llm_unavailable(monkeypatch):
+    # Consigne de L : BEDROCK_MODEL_ID_RISK vide -> llm_unavailable propre, jamais d'exception
+    monkeypatch.setenv("BEDROCK_MODEL_ID_RISK", "")
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    r = make_scorer(use_llm=True)(_req(), _res(), False)
+    assert r.source == RiskSource.LLM_UNAVAILABLE
+    assert "non configuré" in r.signals[-1]

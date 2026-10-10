@@ -52,7 +52,7 @@ class LLMRiskAssessment(BaseModel):
 
 class BedrockRiskClient:
     def __init__(self, model_id: str | None = None, region: str | None = None):
-        self.model_id = model_id or os.getenv("BEDROCK_RISK_MODEL_ID")
+        self.model_id = model_id or os.getenv("BEDROCK_MODEL_ID_RISK")
         self._client = boto3.client(
             "bedrock-runtime",
             region_name=region or os.getenv("AWS_REGION", "us-west-2"),

@@ -13,6 +13,7 @@ from botocore.config import Config
 from dotenv import load_dotenv
 
 from agent.tools import TOOL_CONFIG, call_gateway, to_action_request, to_tool_result
+from agent.validation import validate_action_request
 
 load_dotenv(override=True)
 
@@ -47,7 +48,7 @@ def run(prompt, agent="assistant", user_id="user-claire", max_turns=8, execute=c
     api_key = os.environ[key_env]
     session_id = f"sess-{uuid.uuid4().hex[:8]}"   # une session par conversation (contrat 1.4)
     task_id = f"task-{uuid.uuid4().hex[:8]}"
-    client, model_id = make_client(), os.environ["BEDROCK_MODEL_ID"]
+    client, model_id = make_client(), os.environ["BEDROCK_MODEL_ID_AGENT"]
 
     print(f"[{agent_id}] {session_id}\n👤 {prompt}")
     messages = [{"role": "user", "content": [{"text": prompt}]}]
@@ -59,7 +60,7 @@ def run(prompt, agent="assistant", user_id="user-claire", max_turns=8, execute=c
             system=[{"text": SYSTEM_PROMPT}],
             messages=messages,
             toolConfig=TOOL_CONFIG,
-            inferenceConfig={"maxTokens": 1024, "temperature": 0},
+            inferenceConfig={"maxTokens": 1024},
         )
         msg = resp["output"]["message"]
         messages.append(msg)  # l'API est sans mémoire : on garde tout l'historique
@@ -80,6 +81,9 @@ def run(prompt, agent="assistant", user_id="user-claire", max_turns=8, execute=c
             req = to_action_request(tu["name"], tu["input"], agent_id=agent_id, user_id=user_id,
                                     session_id=session_id, task_id=task_id)
             print(f"   → {tu['name']} {json.dumps(tu['input'], ensure_ascii=False)}")
+            errs = validate_action_request(req)
+            if errs:
+                print(f"   ⚠️ ActionRequest non conforme au schéma : {errs}")
             decision = execute(req, api_key)
             print(f"   ← {decision.get('verdict')} / {decision.get('status')} {decision.get('rule_ids', [])}")
             trace.append({"request": req, "decision": decision})
