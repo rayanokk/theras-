@@ -29,6 +29,7 @@ from contracts.models import (
     canonical_json,
     params_hash,
 )
+from police.approvals.service import new_approval
 from police.connectors.base import Connector
 from police.evidence.vault import EvidenceVault
 from police.identity import IdentityRegistry
@@ -69,6 +70,11 @@ class Pipeline:
         """PA-0001, PA-0002... compteur base sur le nombre d'actions du store."""
         count = len(self._store.list_actions())
         return f"PA-{count + 1:04d}"
+
+    def _next_approval_id(self) -> str:
+        """AP-0001, AP-0002... compteur base sur le nombre d'approbations."""
+        count = len(self._store.list_approvals())
+        return f"AP-{count + 1:04d}"
 
     # ----------------------------------------------------------------- helpers
 
@@ -260,6 +266,15 @@ class Pipeline:
                 )
         elif verdict == "REVIEW":
             status = "PENDING_REVIEW"
+            # Cree l'approbation liee au params_hash de cette decision.
+            approval_id = self._next_approval_id()
+            approval = new_approval(
+                approval_id=approval_id,
+                action_id=action_id,
+                params_hash=phash,
+                now=datetime.now(timezone.utc),
+            )
+            self._store.put_approval(approval.model_dump(mode="json"))
         else:  # DENY
             status = "DENIED"
             self._vault.record(
