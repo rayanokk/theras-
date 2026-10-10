@@ -1,0 +1,6 @@
+New Hire Onboarding Guide (Internal)
+
+Day 1: set up your acme.test account, enable two-factor authentication, and join the #welcome channel.
+Week 1: complete security awareness training and meet your onboarding buddy.
+Week 2: shadow a customer call and submit your first small task for review.
+Questions? Reach out to the People team any time.

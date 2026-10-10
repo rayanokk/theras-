@@ -1,0 +1,154 @@
+{
+  "files": [
+    {
+      "id": "product_brochure",
+      "name": "Product_Brochure",
+      "folder": "Marketing",
+      "owner": "employee-42",
+      "classification": "public",
+      "acl": ["research-agent-01", "mail-agent-01", "cleanup-agent-01"],
+      "trusted": true,
+      "content_file": "data/docs/product_brochure.txt"
+    },
+    {
+      "id": "press_release",
+      "name": "Press_Release",
+      "folder": "Marketing",
+      "owner": "employee-42",
+      "classification": "public",
+      "acl": ["research-agent-01", "mail-agent-01", "cleanup-agent-01"],
+      "trusted": true,
+      "content_file": "data/docs/press_release.txt"
+    },
+    {
+      "id": "company_faq",
+      "name": "Company_FAQ",
+      "folder": "Marketing",
+      "owner": "employee-77",
+      "classification": "public",
+      "acl": ["research-agent-01", "mail-agent-01", "cleanup-agent-01"],
+      "trusted": true,
+      "content_file": "data/docs/company_faq.txt"
+    },
+    {
+      "id": "event_agenda",
+      "name": "Event_Agenda",
+      "folder": "Events",
+      "owner": "employee-77",
+      "classification": "public",
+      "acl": ["research-agent-01", "mail-agent-01", "cleanup-agent-01"],
+      "trusted": true,
+      "content_file": "data/docs/event_agenda.txt"
+    },
+    {
+      "id": "vendor_notes",
+      "name": "vendor_notes",
+      "folder": "Procurement",
+      "owner": "employee-42",
+      "classification": "public",
+      "acl": ["research-agent-01", "mail-agent-01", "cleanup-agent-01"],
+      "trusted": false,
+      "content_file": "data/docs/vendor_notes.txt"
+    },
+    {
+      "id": "team_planning",
+      "name": "Team_Planning",
+      "folder": "Operations",
+      "owner": "employee-42",
+      "classification": "internal",
+      "acl": ["research-agent-01", "mail-agent-01", "cleanup-agent-01"],
+      "trusted": true,
+      "content_file": "data/docs/team_planning.txt"
+    },
+    {
+      "id": "meeting_notes",
+      "name": "Meeting_Notes",
+      "folder": "Operations",
+      "owner": "employee-77",
+      "classification": "internal",
+      "acl": ["research-agent-01", "mail-agent-01", "cleanup-agent-01"],
+      "trusted": true,
+      "content_file": "data/docs/meeting_notes.txt"
+    },
+    {
+      "id": "onboarding_guide",
+      "name": "Onboarding_Guide",
+      "folder": "HR",
+      "owner": "employee-77",
+      "classification": "internal",
+      "acl": ["research-agent-01", "mail-agent-01", "cleanup-agent-01"],
+      "trusted": true,
+      "content_file": "data/docs/onboarding_guide.txt"
+    },
+    {
+      "id": "partner_proposal",
+      "name": "partner_proposal",
+      "folder": "Partnerships",
+      "owner": "employee-42",
+      "classification": "internal",
+      "acl": ["research-agent-01", "mail-agent-01", "cleanup-agent-01"],
+      "trusted": false,
+      "content_file": "data/docs/partner_proposal.txt"
+    },
+    {
+      "id": "candidate_cv",
+      "name": "candidate_cv",
+      "folder": "HR",
+      "owner": "employee-77",
+      "classification": "internal",
+      "acl": ["research-agent-01", "mail-agent-01", "cleanup-agent-01"],
+      "trusted": false,
+      "content_file": "data/docs/candidate_cv.txt"
+    },
+    {
+      "id": "confidential_audit_report",
+      "name": "Confidential_Audit_Report",
+      "folder": "Finance",
+      "owner": "employee-42",
+      "classification": "confidential",
+      "acl": ["research-agent-01"],
+      "trusted": true,
+      "content_file": "data/docs/confidential_audit_report.txt"
+    },
+    {
+      "id": "q3_financials",
+      "name": "Q3_Financials",
+      "folder": "Finance",
+      "owner": "employee-42",
+      "classification": "confidential",
+      "acl": ["research-agent-01"],
+      "trusted": true,
+      "content_file": "data/docs/q3_financials.txt"
+    },
+    {
+      "id": "client_list",
+      "name": "Client_List",
+      "folder": "Sales",
+      "owner": "employee-42",
+      "classification": "confidential",
+      "acl": ["research-agent-01"],
+      "trusted": true,
+      "content_file": "data/docs/client_list.txt"
+    },
+    {
+      "id": "hr_salaries_2026",
+      "name": "HR_Salaries_2026",
+      "folder": "HR",
+      "owner": "employee-77",
+      "classification": "restricted",
+      "acl": ["mail-agent-01"],
+      "trusted": true,
+      "content_file": "data/docs/hr_salaries_2026.txt"
+    },
+    {
+      "id": "security_keys_inventory",
+      "name": "Security_Keys_Inventory",
+      "folder": "Security",
+      "owner": "employee-77",
+      "classification": "restricted",
+      "acl": [],
+      "trusted": true,
+      "content_file": "data/docs/security_keys_inventory.txt"
+    }
+  ]
+}

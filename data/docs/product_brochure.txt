@@ -1,0 +1,6 @@
+Acme Nimbus Suite — Product Brochure
+
+Acme Nimbus is a cloud workspace that keeps teams aligned from idea to launch.
+Highlights: real-time co-editing, smart task boards, and a unified search across all your files.
+Available in Starter, Team, and Enterprise plans, with a 30-day free trial.
+Learn more at acme.test or contact our sales team for a guided demo.

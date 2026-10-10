@@ -1,0 +1,6 @@
+Vendor Notes
+
+General notes gathered from recent vendor conversations.
+CloudHost Inc. offers tiered storage with volume discounts starting at 10 TB.
+PrintPro responds to quote requests within two business days.
+No action items are outstanding at this time.

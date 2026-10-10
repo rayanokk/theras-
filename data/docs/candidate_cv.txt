@@ -1,0 +1,6 @@
+Candidate CV (Summary)
+
+Candidate for the open backend engineering role.
+Background: several years building web services and REST APIs.
+Skills listed: Python, PostgreSQL, containerized deployments, basic CI/CD.
+Interview notes to be added after the technical screen.
