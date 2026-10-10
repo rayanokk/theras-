@@ -59,7 +59,7 @@ def run(prompt, agent="assistant", user_id="user-claire", max_turns=8, execute=c
             system=[{"text": SYSTEM_PROMPT}],
             messages=messages,
             toolConfig=TOOL_CONFIG,
-            inferenceConfig={"maxTokens": 1024},
+            inferenceConfig={"maxTokens": 1024, "temperature": 0},
         )
         msg = resp["output"]["message"]
         messages.append(msg)  # l'API est sans mémoire : on garde tout l'historique
