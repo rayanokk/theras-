@@ -156,6 +156,10 @@ result          rempli si exécuté
 `POST /v1/actions` renvoie toujours une `Decision` : 200 (ALLOW, exécuté), 202 (REVIEW), 403 (DENY).
 
 `RiskSignal` (scoreur de risque, A) :
+Interface du scoreur (A) : `score_action(request: ActionRequest, resource: ResourceInfo,
+session_tainted: bool) -> RiskSignal`. Score entre 0 et 1. En cas d'échec du LLM, renvoie
+les heuristiques avec `source = llm_unavailable`. Ne renvoie jamais de verdict. Appelé
+uniquement si les règles n'ont pas déjà refusé l'action.
 
 ```
 score        0 à 1, ou null
@@ -210,7 +214,7 @@ prev_hash       "0" x 64 pour le premier événement
 hash            sha256(prev_hash + canonical_json(événement sans hash))
 ```
 
-Chemins : ALLOW = REQUESTED, DECIDED, EXECUTED. DENY = REQUESTED, DECIDED, BLOCKED.
+Chemins : ALLOW = REQUESTED, DECIDED, EXECUTED. giDENY = REQUESTED, DECIDED, BLOCKED.
 REVIEW = REQUESTED, DECIDED, puis APPROVAL_DECIDED suivi d'EXECUTED ou BLOCKED, ou bien EXPIRED.
 
 Interface : `EvidenceVault(store)` avec `record(type, action_id, payload, policy_version) -> Event`
