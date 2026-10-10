@@ -1,37 +1,42 @@
-# TODO: à déplacer dans contracts/models.py quand L l'aura créé.
-"""Contrat 3 : interface `Connector` et modèle `ResourceInfo`.
+"""Contrat 3 : interface Connector (outils) et ResourceInfo.
 
-`describe` renvoie des faits sans rien exécuter ; `execute` n'est appelé que
-par le pipeline. Le connecteur rapporte le domaine du destinataire ; c'est le
-moteur de règles qui décide s'il est interne, partenaire ou bloqué.
+Un connecteur expose un outil (google_drive ou mail). Il separe strictement
+l'observation (`describe`, sans effet) de l'action (`execute`, avec effet). Seul
+le pipeline (`police/gateway/pipeline.py`) importe les connecteurs et appelle
+`execute` ; l'agent n'a ni import ni credentials vers eux.
 """
 
-from dataclasses import dataclass
-from typing import Protocol
+from __future__ import annotations
+
+from typing import Any, Protocol, runtime_checkable
+
+from contracts.models import ResourceInfo
 
 
-@dataclass
-class ResourceInfo:
-    """Faits sur une ressource, renvoyés par `Connector.describe`."""
-
-    exists: bool
-    classification: str  # public | internal | confidential | restricted | none
-    owner: str | None
-    acl: list[str]
-    trusted: bool
-    recipient_email: str | None  # share_file : recipient ; send_email : to
-    recipient_domain: str | None  # partie après @, en minuscules
-
-
+@runtime_checkable
 class Connector(Protocol):
-    """Interface d'un outil (google_drive, mail)."""
+    """Protocole commun aux connecteurs d'outils (contrat 3)."""
 
     name: str  # "google_drive" ou "mail"
 
-    def describe(self, action: str, resource_id: str, params: dict) -> ResourceInfo:
-        """Renvoie des faits sur la ressource, sans rien exécuter."""
+    def describe(
+        self, action: str, resource_id: str, params: dict[str, Any]
+    ) -> ResourceInfo:
+        """Renvoie les faits sur la ressource SANS rien executer.
+
+        Lecture seule : aucune ressource n'est partagee, supprimee, envoyee ni
+        modifiee. Le pipeline s'appuie sur ces faits (classification, owner, acl,
+        trusted, destinataire) pour decider via la politique.
+        """
         ...
 
-    def execute(self, action: str, resource_id: str, params: dict) -> dict:
-        """Exécute l'action. Appelé uniquement par le pipeline."""
+    def execute(
+        self, action: str, resource_id: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Realise effectivement l'action et renvoie son resultat.
+
+        A n'appeler QUE par le pipeline, apres un verdict ALLOW (ou une REVIEW
+        approuvee puis revalidee). Ne jamais appeler depuis l'agent ni avant la
+        decision de la politique.
+        """
         ...
