@@ -1,0 +1,49 @@
+{
+  "agents": [
+    {
+      "id": "research-agent-01",
+      "description": "Agent de recherche : lit, liste et partage des fichiers, et envoie des e-mails.",
+      "allowed_actions": ["read_file", "list_files", "share_file", "send_email"],
+      "api_key_env": "RESEARCH_AGENT_01_API_KEY"
+    },
+    {
+      "id": "cleanup-agent-01",
+      "description": "Agent de nettoyage : liste et supprime des fichiers.",
+      "allowed_actions": ["list_files", "delete_file"],
+      "api_key_env": "CLEANUP_AGENT_01_API_KEY"
+    },
+    {
+      "id": "mail-agent-01",
+      "description": "Agent de messagerie : lit des fichiers et envoie des e-mails.",
+      "allowed_actions": ["read_file", "send_email"],
+      "api_key_env": "MAIL_AGENT_01_API_KEY"
+    }
+  ],
+  "users": [
+    {
+      "id": "employee-42",
+      "department": "finance"
+    },
+    {
+      "id": "employee-77",
+      "department": "RH"
+    }
+  ],
+  "approvers": [
+    {
+      "id": "manager-finance",
+      "role": "manager-finance",
+      "api_key_env": "MANAGER_FINANCE_API_KEY"
+    },
+    {
+      "id": "security-officer",
+      "role": "security-officer",
+      "api_key_env": "SECURITY_OFFICER_API_KEY"
+    }
+  ],
+  "org": {
+    "internal_domains": ["acme.test"],
+    "partner_domains": ["partner.test"],
+    "blocked_domains": ["exfil.test"]
+  }
+}
