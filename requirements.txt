@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic>=2
+pyyaml
+python-dotenv
+boto3
+streamlit
+httpx
+pytest
+mcp
+rich
