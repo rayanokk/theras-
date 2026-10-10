@@ -1,0 +1,148 @@
+# Theras : politique de décision
+#
+# Ce fichier est lu par police/policy/engine.py. Aucun LLM ne l'écrit ni ne l'interprète.
+#
+# Ordre d'évaluation (voir .kiro/steering/contracts.md, partie 3) :
+#   1. stage: deny    -> une règle vraie suffit : DENY, on s'arrête
+#   2. stage: review  -> une règle vraie suffit : REVIEW
+#   3. stage: allow   -> une règle vraie suffit : ALLOW ; aucune : DENY par défaut
+#   4. stage: harden  -> seulement si le verdict n'est pas DENY : ALLOW devient REVIEW,
+#                        REVIEW reste REVIEW avec la raison ajoutée
+#
+# Une règle s'applique si TOUTES ses conditions sont vraies. Formes de condition :
+#   fait: valeur          le fait vaut exactement cette valeur
+#   fait_in: [liste]      le fait est dans la liste
+#   fait_gte: nombre      le fait est supérieur ou égal au nombre
+#   any_of: [ {...}, ...] au moins un des groupes de conditions est vrai
+# Un fait absent rend la condition fausse.
+#
+# Faits fournis par le pipeline :
+#   identity_ok, action_allowed, resource_ok, params_valid        (booléens)
+#   action, classification                                        (texte)
+#   has_recipient, recipient_internal, recipient_partner,
+#   recipient_blocked, sensitive, session_tainted,
+#   risk_unavailable                                              (booléens)
+#   risk_score                                                    (nombre, absent sans LLM)
+
+policy_version: "2026-10-10.1"
+
+internal_domains: [acme.example]
+partner_domains: [partner.example]
+blocked_domains: [pastebin.example]
+
+rules:
+
+  # ---------------------------------------------------------------- 1. DENY
+
+  - id: R-DENY-01
+    stage: deny
+    when:
+      identity_ok: false
+    reason: "Clé API inconnue, ou agent déclaré différent de l'identité réelle"
+
+  - id: R-DENY-02
+    stage: deny
+    when:
+      action_allowed: false
+    reason: "Outil ou action hors des droits de cet agent"
+
+  - id: R-DENY-03
+    stage: deny
+    when:
+      resource_ok: false
+    reason: "Ressource inexistante, ou agent absent de la liste d'accès"
+
+  - id: R-DENY-04
+    stage: deny
+    when:
+      classification: restricted
+      has_recipient: true
+      recipient_internal: false
+    reason: "Fichier restricted partagé ou envoyé hors de l'entreprise"
+
+  - id: R-DENY-05
+    stage: deny
+    when:
+      recipient_blocked: true
+    reason: "Destinataire sur un domaine bloqué"
+
+  - id: R-DENY-06
+    stage: deny
+    when:
+      params_valid: false
+    reason: "Requête ou paramètres invalides"
+
+  # -------------------------------------------------------------- 2. REVIEW
+
+  - id: R-REV-01
+    stage: review
+    when:
+      action_in: [share_file, send_email]
+      classification: confidential
+      has_recipient: true
+      recipient_internal: false
+    reason: "Fichier confidentiel partagé ou envoyé hors de l'entreprise"
+
+  - id: R-REV-03
+    stage: review
+    when:
+      action: delete_file
+    reason: "Suppression de fichier, action irréversible"
+
+  - id: R-REV-05
+    stage: review
+    when:
+      action_in: [share_file, send_email]
+      classification: confidential
+      has_recipient: true
+      recipient_internal: true
+    reason: "Fichier confidentiel partagé ou envoyé en interne"
+
+  # --------------------------------------------------------------- 3. ALLOW
+
+  - id: R-ALLOW-01
+    stage: allow
+    when:
+      action_in: [read_file, list_files]
+    reason: "Lecture par un agent présent dans la liste d'accès"
+
+  - id: R-ALLOW-02
+    stage: allow
+    when:
+      action_in: [share_file, send_email]
+      classification_in: [public, none]
+      recipient_partner: true
+    reason: "Contenu public partagé ou envoyé au partenaire autorisé"
+
+  - id: R-ALLOW-03
+    stage: allow
+    when:
+      action: send_email
+      recipient_internal: true
+      classification_in: [public, internal, none]
+    reason: "Mail interne sans pièce jointe sensible"
+
+  - id: R-ALLOW-04
+    stage: allow
+    when:
+      action: share_file
+      recipient_internal: true
+      classification_in: [public, internal]
+    reason: "Fichier public ou interne partagé en interne"
+
+  # ------------------------------------------------------------- 4. HARDEN
+
+  - id: R-REV-02
+    stage: harden
+    when:
+      session_tainted: true
+      sensitive: true
+    reason: "Session contaminée par un document non fiable, action sensible"
+
+  - id: R-REV-04
+    stage: harden
+    when:
+      any_of:
+        - {risk_score_gte: 0.7}
+        - {risk_unavailable: true, sensitive: true}
+    reason: "Risque élevé, ou évaluation du risque indisponible sur action sensible"

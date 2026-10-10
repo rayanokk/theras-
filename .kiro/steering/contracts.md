@@ -213,6 +213,11 @@ hash            sha256(prev_hash + canonical_json(événement sans hash))
 Chemins : ALLOW = REQUESTED, DECIDED, EXECUTED. DENY = REQUESTED, DECIDED, BLOCKED.
 REVIEW = REQUESTED, DECIDED, puis APPROVAL_DECIDED suivi d'EXECUTED ou BLOCKED, ou bien EXPIRED.
 
+Interface : `EvidenceVault(store)` avec `record(type, action_id, payload, policy_version) -> Event`
+(calcule seq, ts, prev_hash, hash et appelle `store.append_event`), `verify() -> {"valid": bool,
+"broken_at": int | None}` (premier seq invalide) et `export_jsonl() -> str`.
+Limite connue : la suppression des derniers événements n'est pas détectée sans ancrage externe du dernier hash.
+
 ### Contrat 5 : approbations (L)
 
 ```

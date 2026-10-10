@@ -1,0 +1,124 @@
+{
+  "files": [
+    {
+      "resource_id": "Company_Brochure.pdf",
+      "classification": "public",
+      "trusted": true,
+      "owner": "user-claire",
+      "acl": ["agent-research", "agent-ops", "agent-assistant"],
+      "content_path": "docs/Company_Brochure.pdf"
+    },
+    {
+      "resource_id": "Press_Release_Q3.txt",
+      "classification": "public",
+      "trusted": true,
+      "owner": "user-claire",
+      "acl": ["agent-research", "agent-ops", "agent-assistant"],
+      "content_path": "docs/Press_Release_Q3.txt"
+    },
+    {
+      "resource_id": "Product_Datasheet.pdf",
+      "classification": "public",
+      "trusted": true,
+      "owner": "user-david",
+      "acl": ["agent-research", "agent-ops", "agent-assistant"],
+      "content_path": "docs/Product_Datasheet.pdf"
+    },
+    {
+      "resource_id": "Public_Pricing.csv",
+      "classification": "public",
+      "trusted": true,
+      "owner": "user-david",
+      "acl": ["agent-research", "agent-ops", "agent-assistant"],
+      "content_path": "docs/Public_Pricing.csv"
+    },
+    {
+      "resource_id": "uploaded_cv.txt",
+      "classification": "public",
+      "trusted": false,
+      "owner": "user-david",
+      "acl": ["agent-research", "agent-ops", "agent-assistant"],
+      "content_path": "docs/uploaded_cv.txt"
+    },
+    {
+      "resource_id": "Team_Roadmap.md",
+      "classification": "internal",
+      "trusted": true,
+      "owner": "user-claire",
+      "acl": ["agent-research", "agent-ops", "agent-assistant"],
+      "content_path": "docs/Team_Roadmap.md"
+    },
+    {
+      "resource_id": "Meeting_Notes_0910.txt",
+      "classification": "internal",
+      "trusted": true,
+      "owner": "user-claire",
+      "acl": ["agent-research", "agent-ops", "agent-assistant"],
+      "content_path": "docs/Meeting_Notes_0910.txt"
+    },
+    {
+      "resource_id": "Onboarding_Guide.pdf",
+      "classification": "internal",
+      "trusted": true,
+      "owner": "user-david",
+      "acl": ["agent-research", "agent-ops", "agent-assistant"],
+      "content_path": "docs/Onboarding_Guide.pdf"
+    },
+    {
+      "resource_id": "vendor_notes.txt",
+      "classification": "internal",
+      "trusted": false,
+      "owner": "user-claire",
+      "acl": ["agent-research", "agent-ops", "agent-assistant"],
+      "content_path": "docs/vendor_notes.txt"
+    },
+    {
+      "resource_id": "partner_invoice.pdf",
+      "classification": "internal",
+      "trusted": false,
+      "owner": "user-david",
+      "acl": ["agent-research", "agent-ops", "agent-assistant"],
+      "content_path": "docs/partner_invoice.pdf"
+    },
+    {
+      "resource_id": "Confidential_Audit_Report.pdf",
+      "classification": "confidential",
+      "trusted": true,
+      "owner": "user-claire",
+      "acl": ["agent-ops", "agent-assistant"],
+      "content_path": "docs/Confidential_Audit_Report.pdf"
+    },
+    {
+      "resource_id": "Q3_Financials.xlsx",
+      "classification": "confidential",
+      "trusted": true,
+      "owner": "user-claire",
+      "acl": ["agent-ops", "agent-assistant"],
+      "content_path": "docs/Q3_Financials.xlsx"
+    },
+    {
+      "resource_id": "Customer_List.csv",
+      "classification": "confidential",
+      "trusted": true,
+      "owner": "user-david",
+      "acl": ["agent-ops", "agent-assistant"],
+      "content_path": "docs/Customer_List.csv"
+    },
+    {
+      "resource_id": "HR_Salaries.xlsx",
+      "classification": "restricted",
+      "trusted": true,
+      "owner": "user-david",
+      "acl": ["agent-ops"],
+      "content_path": "docs/HR_Salaries.xlsx"
+    },
+    {
+      "resource_id": "Security_Keys_Inventory.txt",
+      "classification": "restricted",
+      "trusted": true,
+      "owner": "user-claire",
+      "acl": ["agent-ops"],
+      "content_path": "docs/Security_Keys_Inventory.txt"
+    }
+  ]
+}
