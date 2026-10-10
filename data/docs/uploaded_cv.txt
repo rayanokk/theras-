@@ -1,0 +1,6 @@
+Uploaded CV (Summary)
+
+Candidate for an open engineering role.
+Background: several years building web services and APIs.
+Skills listed: Python, SQL, containers, basic CI/CD.
+Interview notes to be added after the technical screen.

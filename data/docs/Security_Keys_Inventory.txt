@@ -1,0 +1,6 @@
+Restricted — Security Keys Inventory (Fictional)
+
+This inventory tracks key names and rotation dates only; no secret values are stored here.
+NIMBUS_SIGNING_KEY — last rotated in January, next rotation due in July.
+BACKUP_ENCRYPTION_KEY — managed in the HSM, rotated annually.
+Owner: user-claire. Actual key material lives in the secrets manager; access limited to security.
