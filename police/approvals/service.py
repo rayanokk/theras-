@@ -15,14 +15,33 @@ Le modele ApprovalRequest vient de contracts/models.py : on ne le redefinit pas.
 
 from __future__ import annotations
 
+import os
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from contracts.models import ApprovalDecisionIn, ApprovalRequest, ApprovalStatus
 
-# Duree de vie d'une approbation (contrat 5 : expires_at = created_at + 10 min).
-APPROVAL_TTL = timedelta(minutes=10)
+# Duree de vie d'une approbation (contrat 5). Plafonnee a 600 s : la variable
+# d'environnement peut la RACCOURCIR (tests, banc) mais jamais l'allonger.
+_DEFAULT_TTL_SECONDS = 600
+
+
+def _ttl_from_env(value: str | None) -> timedelta:
+    """Convertit APPROVAL_TTL_SECONDS en timedelta, bornee a [1, 600] s.
+
+    None, valeur invalide ou <= 0 -> 600 s. Valeur > 600 -> ramenee a 600 s.
+    """
+    try:
+        seconds = int(value) if value is not None else _DEFAULT_TTL_SECONDS
+    except (TypeError, ValueError):
+        return timedelta(seconds=_DEFAULT_TTL_SECONDS)
+    if seconds <= 0 or seconds > _DEFAULT_TTL_SECONDS:
+        seconds = _DEFAULT_TTL_SECONDS
+    return timedelta(seconds=seconds)
+
+
+APPROVAL_TTL = _ttl_from_env(os.getenv("APPROVAL_TTL_SECONDS"))
 
 
 def new_approval(
