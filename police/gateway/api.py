@@ -80,7 +80,9 @@ def create_app(pipeline, store, vault, identities, approvals) -> FastAPI:
     def list_actions(
         status: str | None = None, x_api_key: str | None = Header(default=None)
     ):
-        _identity_or_401(x_api_key)
+        # Liste globale reservee aux approbateurs (comme /v1/evidence) : un agent
+        # ne consulte que ses propres actions via GET /v1/actions/{id}.
+        _require_approver(x_api_key)
         return store.list_actions(status)
 
     # ----------------------------------------------------------------- evidence

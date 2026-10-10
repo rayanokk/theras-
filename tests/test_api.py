@@ -124,6 +124,16 @@ def test_get_existing_action_returns_200(client):
     assert resp.json()["action_id"] == action_id
 
 
+def test_list_actions_with_agent_key_is_403(client):
+    resp = client.get("/v1/actions", headers={"X-API-Key": KEY_ASSISTANT})
+    assert resp.status_code == 403
+
+
+def test_list_actions_with_approver_key_is_200(client):
+    resp = client.get("/v1/actions", headers={"X-API-Key": KEY_ALICE})
+    assert resp.status_code == 200
+
+
 def test_evidence_without_key_returns_401(client):
     resp = client.get("/v1/evidence")
     assert resp.status_code == 401
