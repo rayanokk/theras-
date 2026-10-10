@@ -62,28 +62,46 @@ def _action(
     rule_ids,
     reasons,
     created_at,
+    reason,
+    task_id,
     approval_id=None,
     result=None,
+    risk=None,
+    taint_sources=None,
 ) -> dict:
-    """Construit un dict action conforme au contrat."""
+    """Construit une action au format Gateway.
+
+    Champs de la Decision au premier niveau, plus agent_id, declared_agent_id,
+    session_id, created_at, taint_sources ; la demande dans `request`."""
     return {
+        # --- champs Decision (contrat 2) au premier niveau ---
         "action_id": action_id,
-        "agent_id": agent_id,
-        "user_id": user_id,
-        "session_id": session_id,
-        "tool": tool,
-        "action": action,
-        "resource_id": resource_id,
-        "params": params,
-        "params_hash": _compute_params_hash(tool, action, resource_id, params),
         "verdict": verdict,
         "status": status,
         "rule_ids": rule_ids,
         "reasons": reasons,
+        "risk": risk,
+        "params_hash": _compute_params_hash(tool, action, resource_id, params),
         "policy_version": POLICY_VERSION,
         "approval_id": approval_id,
         "result": result,
+        # --- enveloppe Gateway ---
+        "agent_id": agent_id,
+        "declared_agent_id": agent_id,
+        "request": {
+            "agent_id": agent_id,
+            "user_id": user_id,
+            "tool": tool,
+            "action": action,
+            "resource_id": resource_id,
+            "parameters": params,
+            "reason": reason,
+            "session_id": session_id,
+            "task_id": task_id,
+        },
+        "session_id": session_id,
         "created_at": created_at,
+        "taint_sources": taint_sources or [],
     }
 
 
@@ -91,7 +109,7 @@ DEFAULT_TTL_MINUTES = 10
 
 
 def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
-    """Insère les 6 actions, approbations, sessions et événements de démo.
+    """Insère les 7 actions, approbations, sessions et événements de démo.
 
     ttl_minutes contrôle l'expiration de l'approbation pending AP-0001
     (expires_at = created_at + ttl_minutes)."""
@@ -106,6 +124,8 @@ def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
         "google_drive", "read_file", "Team_Roadmap.md", {},
         "ALLOW", "EXECUTED", ["R-ALLOW-01"],
         ["read_file autorisé : agent dans l'ACL."], ts,
+        reason="Lecture de la feuille de route de l'équipe.",
+        task_id="task-demo-1",
         result={"content": "<contenu de Team_Roadmap.md>", "trusted": True},
     )
     store.put_action(a1)
@@ -120,6 +140,8 @@ def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
         "google_drive", "read_file", "vendor_notes.txt", {},
         "ALLOW", "EXECUTED", ["R-ALLOW-01"],
         ["read_file autorisé ; ressource non fiable, session marquée tainted."], ts,
+        reason="Lecture des notes fournisseurs partagées.",
+        task_id="task-demo-1",
         result={"content": "<contenu de vendor_notes.txt>", "trusted": False},
     )
     store.put_action(a2)
@@ -135,6 +157,17 @@ def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
     # l'externe : REVIEW R-REV-01 (confidentiel à l'extérieur) + R-REV-02
     # (session tainted + action sensible). Approbation AP-0001 pending.
     a3_params = {"recipient": "audit@external.example", "role": "reader"}
+    a3_risk = {
+        "score": 0.82,
+        "signals": [
+            "destinataire externe",
+            "document confidentiel",
+            "session contaminée par vendor_notes.txt",
+        ],
+        "source": "heuristics",
+        "summary": "Partage d'un document confidentiel vers un destinataire externe depuis une session contaminée.",
+        "latency_ms": 12,
+    }
     a3 = _action(
         "PA-0003", "agent-assistant", "user-claire", "sess-demo-1",
         "google_drive", "share_file", "Confidential_Audit_Report.pdf", a3_params,
@@ -143,7 +176,11 @@ def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
             "Fichier confidentiel partagé à l'extérieur.",
             "Session tainted et action sensible.",
         ], ts,
+        reason="Transmission du rapport d'audit confidentiel à l'auditeur externe.",
+        task_id="task-demo-1",
         approval_id="AP-0001",
+        risk=a3_risk,
+        taint_sources=["vendor_notes.txt"],
     )
     store.put_action(a3)
     approval = {
@@ -170,6 +207,9 @@ def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
         "mail", "send_email", "Q3_Financials.xlsx", a4_params,
         "DENY", "DENIED", ["R-DENY-05"],
         ["Destinataire sur un domaine bloqué (pastebin.example)."], ts,
+        reason="Envoi des résultats du T3 à une adresse externe.",
+        task_id="task-demo-1",
+        taint_sources=["vendor_notes.txt"],
     )
     store.put_action(a4)
     vault.record("REQUESTED", "PA-0004", {"request": "send_email Q3_Financials.xlsx"}, POLICY_VERSION)
@@ -184,6 +224,8 @@ def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
         "google_drive", "delete_file", "Team_Roadmap.md", {},
         "REVIEW", "EXECUTED", ["R-REV-03"],
         ["Toute suppression de fichier passe en REVIEW."], ts,
+        reason="Suppression de la feuille de route obsolète.",
+        task_id="task-demo-2",
         approval_id="AP-0002", result={"deleted": True},
     )
     store.put_action(a5)
@@ -213,11 +255,43 @@ def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
         "google_drive", "share_file", "HR_Salaries.xlsx", a6_params,
         "DENY", "DENIED", ["R-DENY-04"],
         ["Fichier restricted partagé hors de l'entreprise."], ts,
+        reason="Partage du tableau des salaires avec un destinataire externe.",
+        task_id="task-demo-2",
     )
     store.put_action(a6)
     vault.record("REQUESTED", "PA-0006", {"request": "share_file HR_Salaries.xlsx"}, POLICY_VERSION)
     vault.record("DECIDED", "PA-0006", {"verdict": "DENY", "rule_ids": ["R-DENY-04"]}, POLICY_VERSION)
     vault.record("BLOCKED", "PA-0006", {"reason": "R-DENY-04"}, POLICY_VERSION)
+
+    # ------------------------------------------------------------------ PA-0007
+    # agent-assistant, share_file confidentiel vers l'externe : REVIEW R-REV-01,
+    # PENDING_REVIEW. Approbation AP-0003 pending (une REVIEW porte un approval_id).
+    a7_params = {"recipient": "x@external.example", "role": "reader"}
+    a7 = _action(
+        "PA-0007", "agent-assistant", "user-claire", "sess-a61177e5",
+        "google_drive", "share_file", "Customer_List.csv", a7_params,
+        "REVIEW", "PENDING_REVIEW", ["R-REV-01"],
+        ["Fichier confidentiel partagé ou envoyé hors de l'entreprise"], ts,
+        reason="Partage du fichier Customer_List.csv avec un utilisateur externe en lecture seule",
+        task_id="task-a86eec1d",
+        approval_id="AP-0003",
+    )
+    store.put_action(a7)
+    approval7 = {
+        "approval_id": "AP-0003",
+        "action_id": "PA-0007",
+        "params_hash": a7["params_hash"],
+        "status": "pending",
+        "created_at": ts,
+        "expires_at": _iso(now + timedelta(minutes=ttl_minutes)),
+        "approver_id": None,
+        "decision": None,
+        "justification": None,
+        "decided_at": None,
+    }
+    store.put_approval(approval7)
+    vault.record("REQUESTED", "PA-0007", {"request": "share_file Customer_List.csv"}, POLICY_VERSION)
+    vault.record("DECIDED", "PA-0007", {"verdict": "REVIEW", "rule_ids": ["R-REV-01"], "approval_id": "AP-0003"}, POLICY_VERSION)
 
 
 def print_summary(store: SQLiteStore) -> None:

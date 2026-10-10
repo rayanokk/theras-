@@ -149,7 +149,7 @@ def test_declared_agent_id_mismatch_is_deny_01(ctx):
     body["agent_id"] = "agent-ops"  # declare != cle de research
     decision = pipe.handle(body, KEY_RESEARCH)
     assert decision.verdict == "DENY"
-    assert "R-DENY-01" in decision.rule_ids
+    assert decision.rule_ids == ["R-DENY-01"]
 
 
 def test_research_delete_is_deny_02(ctx):
@@ -166,6 +166,60 @@ def test_research_delete_is_deny_02(ctx):
     decision = pipe.handle(body, KEY_RESEARCH)
     assert decision.verdict == "DENY"
     assert "R-DENY-02" in decision.rule_ids
+
+
+# --- Explicabilite : un fait non verifie est absent, pas False ----------------
+
+
+def test_delete_out_of_rights_yields_only_deny_02(ctx):
+    # agent-research n'a pas delete_file : R-DENY-02 seul, pas de R-DENY-03 a cote.
+    pipe = ctx.make()
+    body = {
+        "agent_id": "agent-research",
+        "tool": "google_drive",
+        "action": "delete_file",
+        "resource_id": "Team_Roadmap.md",
+        "parameters": {},
+        "session_id": "sess-1",
+        "task_id": "task-1",
+    }
+    decision = pipe.handle(body, KEY_RESEARCH)
+    assert decision.verdict == "DENY"
+    assert decision.rule_ids == ["R-DENY-02"]
+
+
+def test_unknown_key_yields_only_deny_01(ctx):
+    # Cle inconnue : R-DENY-01 seul, pas de R-DENY-02 a cote.
+    pipe = ctx.make()
+    decision = pipe.handle(_read("Company_Brochure.pdf"), "wrong-key")
+    assert decision.verdict == "DENY"
+    assert decision.rule_ids == ["R-DENY-01"]
+
+
+def test_read_outside_acl_yields_deny_03(ctx):
+    # agent-assistant n'est pas dans l'ACL de HR_Salaries.xlsx (restricted, ops).
+    pipe = ctx.make()
+    body = {
+        "agent_id": "agent-assistant",
+        "tool": "google_drive",
+        "action": "read_file",
+        "resource_id": "HR_Salaries.xlsx",
+        "parameters": {},
+        "session_id": "sess-1",
+        "task_id": "task-1",
+    }
+    decision = pipe.handle(body, KEY_ASSISTANT)
+    assert decision.verdict == "DENY"
+    assert decision.rule_ids == ["R-DENY-03"]
+
+
+def test_missing_connector_is_deny_03_fail_closed(ctx):
+    # Connecteur retire du dict : resource_ok fail closed -> DENY R-DENY-03.
+    ctx.connectors.pop("google_drive")
+    pipe = ctx.make()
+    decision = pipe.handle(_read("Company_Brochure.pdf"), KEY_RESEARCH)
+    assert decision.verdict == "DENY"
+    assert "R-DENY-03" in decision.rule_ids
 
 
 # --- ACL / resource_id ---------------------------------------------------------
@@ -289,6 +343,25 @@ def test_risk_scorer_exception_hardens_to_review_04(ctx):
     )
     assert decision.verdict == "REVIEW"
     assert "R-REV-04" in decision.rule_ids
+
+
+def test_risk_scorer_exception_is_fail_closed_on_internal_share(ctx):
+    # Partage d'un fichier internal vers un destinataire interne : normalement
+    # ALLOW (R-ALLOW-04). Un scoreur qui plante doit durcir en REVIEW (R-REV-04)
+    # sans propager l'exception, et renseigner un RiskSignal "indisponible".
+    def boom(request, resource_info, tainted):
+        raise RuntimeError("scorer down")
+
+    pipe = ctx.make(risk_scorer=boom)
+    decision = pipe.handle(
+        _share("agent-ops", "Team_Roadmap.md", "colleague@acme.example"),
+        KEY_OPS,
+    )
+    assert decision.verdict == "REVIEW"
+    assert "R-REV-04" in decision.rule_ids
+    assert decision.risk is not None
+    assert decision.risk.source.value == "llm_unavailable"
+    assert decision.risk.signals == ["scorer_error: RuntimeError"]
 
 
 def test_risk_scorer_not_called_when_deny(ctx):

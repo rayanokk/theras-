@@ -15,11 +15,11 @@ def test_seed_demo_db_populates_expected_state(tmp_path):
     try:
         seed(store)
 
-        # 6 actions.
-        assert len(store.list_actions()) == 6
+        # 7 actions.
+        assert len(store.list_actions()) == 7
 
-        # Une seule approbation pending.
-        assert len(store.list_approvals(status="pending")) == 1
+        # Deux approbations pending (AP-0001 et AP-0003).
+        assert len(store.list_approvals(status="pending")) == 2
 
         # Chaîne de preuves valide.
         assert EvidenceVault(store).verify() == {"valid": True, "broken_at": None}
@@ -40,6 +40,27 @@ def test_pa_0003_decision_carries_approval_id(tmp_path):
         assert decisions["PA-0003"].approval_id == "AP-0001"
         assert decisions["PA-0005"].approval_id == "AP-0002"
         assert decisions["PA-0001"].approval_id is None
+    finally:
+        client.close()
+
+
+def test_pa_0003_decision_has_risk(tmp_path):
+    db_path = str(tmp_path / "demo_risk.db")
+
+    store = SQLiteStore(db_path)
+    seed(store)
+    store.close()
+
+    client = LocalClient(db_path=db_path)
+    try:
+        decisions = {d.action_id: d for d in client.list_actions()}
+        risk = decisions["PA-0003"].risk
+        assert risk is not None
+        assert risk.score == 0.82
+        assert risk.source.value == "heuristics"
+        assert "destinataire externe" in risk.signals
+        assert risk.summary
+        assert isinstance(risk.latency_ms, int)
     finally:
         client.close()
 
