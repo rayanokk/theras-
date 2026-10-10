@@ -58,6 +58,11 @@ class DriveMock:
 
     # ------------------------------------------------------------------ lecture
 
+    @property
+    def agents(self) -> list[str]:
+        """Liste des identités de type agent (depuis identities.json)."""
+        return list(self._agents)
+
     def get_file(self, resource_id: str) -> dict | None:
         """Renvoie la fiche du fichier (copie), ou None s'il est inconnu."""
         f = self._files.get(resource_id)
