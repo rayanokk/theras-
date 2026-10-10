@@ -54,3 +54,17 @@ class IdentityRegistry:
         except (TypeError, ValueError):
             return None
         return None
+
+    def get(self, agent_id: str | None) -> dict[str, Any] | None:
+        """Renvoie l'identite d'identifiant agent_id, sinon None.
+
+        Sert a la revalidation d'une approbation : on retrouve l'identite reelle
+        a partir de l'agent_id stocke dans l'action, sans repasser par la cle.
+        None ou identifiant inconnu donnent None.
+        """
+        if not agent_id:
+            return None
+        for identity in self._identities:
+            if identity.get("id") == agent_id:
+                return identity
+        return None
