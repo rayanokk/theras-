@@ -13,7 +13,7 @@ Les pages Streamlit ne connaissent que ce module, jamais SQLiteStore.
 import os
 from typing import Protocol
 
-from contracts.models import ApprovalRequest, Decision, Event
+from contracts.models import ActionRecord, ApprovalView, Event
 
 # Variables d'environnement (cf. .env.example).
 ENV_DB_PATH = "POLICE_DB_PATH"
@@ -49,7 +49,7 @@ def _decide_message_for_status(status_code: int) -> str:
 class ConsoleClient(Protocol):
     """Interface de lecture/décision pour la console."""
 
-    def list_actions(self, status: str | None = None) -> list[Decision]: ...
+    def list_actions(self, status: str | None = None) -> list[ActionRecord]: ...
 
     def list_action_rows(self, status: str | None = None) -> list[dict]: ...
 
@@ -59,7 +59,7 @@ class ConsoleClient(Protocol):
 
     def export_jsonl(self) -> str: ...
 
-    def list_pending_approvals(self) -> list[ApprovalRequest]: ...
+    def list_pending_approvals(self) -> list[ApprovalView]: ...
 
     def decide(self, approval_id: str, decision: str, justification: str) -> dict: ...
 
@@ -71,61 +71,35 @@ def _recipient_from_params(parameters: dict) -> str | None:
     return parameters.get("recipient") or parameters.get("to")
 
 
-def _action_to_row(action: dict) -> dict:
-    """Ligne d'affichage pour le tableau.
+def _action_to_row(record: ActionRecord) -> dict:
+    """Ligne d'affichage pour le tableau, à partir d'un ActionRecord.
 
-    Lit tool/action/resource_id/user_id/reason/recipient depuis `request`
-    (format Gateway), avec repli sur l'ancien format à plat. Expose aussi
+    Lit tool/action/resource_id/user_id/reason/recipient depuis `record.request`
+    (format Gateway), avec repli sur d'éventuels attributs à plat. Expose aussi
     reason et taint_sources."""
-    request = action.get("request")
-    if isinstance(request, dict):
-        tool = request.get("tool")
-        act = request.get("action")
-        resource_id = request.get("resource_id")
-        user_id = request.get("user_id")
-        reason = request.get("reason")
-        recipient = _recipient_from_params(request.get("parameters", {}))
-    else:
-        # Repli : ancien format à plat.
-        tool = action.get("tool")
-        act = action.get("action")
-        resource_id = action.get("resource_id")
-        user_id = action.get("user_id")
-        reason = action.get("reason")
-        recipient = _recipient_from_params(action.get("params", {}))
+    request = record.request if isinstance(record.request, dict) else {}
+    tool = request.get("tool")
+    act = request.get("action")
+    resource_id = request.get("resource_id")
+    user_id = request.get("user_id")
+    reason = request.get("reason")
+    recipient = _recipient_from_params(request.get("parameters", {}))
 
     return {
-        "action_id": action.get("action_id"),
-        "agent_id": action.get("agent_id"),
+        "action_id": record.action_id,
+        "agent_id": record.agent_id,
+        "declared_agent_id": record.declared_agent_id,
         "tool": tool,
         "action": act,
         "resource_id": resource_id,
         "user_id": user_id,
         "reason": reason,
         "recipient": recipient,
-        "verdict": action.get("verdict"),
-        "status": action.get("status"),
-        "rule_ids": ", ".join(action.get("rule_ids", [])),
-        "taint_sources": action.get("taint_sources", []),
+        "verdict": record.verdict.value,
+        "status": record.status.value,
+        "rule_ids": ", ".join(record.rule_ids),
+        "taint_sources": list(record.taint_sources),
     }
-
-
-def _action_to_decision(action: dict) -> Decision:
-    """Convertit un dict action stocké en Decision (sous-ensemble du contrat 2)."""
-    return Decision.model_validate(
-        {
-            "action_id": action["action_id"],
-            "verdict": action["verdict"],
-            "status": action["status"],
-            "rule_ids": action.get("rule_ids", []),
-            "reasons": action.get("reasons", []),
-            "risk": action.get("risk"),
-            "params_hash": action.get("params_hash", ""),
-            "policy_version": action.get("policy_version", ""),
-            "approval_id": action.get("approval_id"),
-            "result": action.get("result"),
-        }
-    )
 
 
 class LocalClient:
@@ -140,11 +114,13 @@ class LocalClient:
         self._store = SQLiteStore(self._db_path)
         self._vault = EvidenceVault(self._store)
 
-    def list_actions(self, status: str | None = None) -> list[Decision]:
-        return [_action_to_decision(a) for a in self._store.list_actions(status)]
+    def list_actions(self, status: str | None = None) -> list[ActionRecord]:
+        return [
+            ActionRecord.model_validate(a) for a in self._store.list_actions(status)
+        ]
 
     def list_action_rows(self, status: str | None = None) -> list[dict]:
-        return [_action_to_row(a) for a in self._store.list_actions(status)]
+        return [_action_to_row(r) for r in self.list_actions(status)]
 
     def list_events(self, action_id: str | None = None) -> list[Event]:
         return [Event.model_validate(e) for e in self._store.list_events(action_id)]
@@ -155,9 +131,9 @@ class LocalClient:
     def export_jsonl(self) -> str:
         return self._vault.export_jsonl()
 
-    def list_pending_approvals(self) -> list[ApprovalRequest]:
+    def list_pending_approvals(self) -> list[ApprovalView]:
         return [
-            ApprovalRequest.model_validate(a)
+            ApprovalView.model_validate(a)
             for a in self._store.list_approvals(status="pending")
         ]
 
@@ -194,19 +170,16 @@ class HttpClient:
             transport=transport,
         )
 
-    def list_actions(self, status: str | None = None) -> list[Decision]:
+    def list_actions(self, status: str | None = None) -> list[ActionRecord]:
         params = {"status": status} if status else None
         resp = self._client.get("/v1/actions", params=params)
         resp.raise_for_status()
-        return [Decision.model_validate(item) for item in resp.json()]
+        return [ActionRecord.model_validate(item) for item in resp.json()]
 
     def list_action_rows(self, status: str | None = None) -> list[dict]:
-        # L'API renvoie les actions au format Gateway (request imbriqué) ;
-        # _action_to_row sait en extraire outil/action/ressource/destinataire.
-        params = {"status": status} if status else None
-        resp = self._client.get("/v1/actions", params=params)
-        resp.raise_for_status()
-        return [_action_to_row(item) for item in resp.json()]
+        # L'API renvoie des ActionRecord (request imbriqué) ; _action_to_row
+        # en extrait outil/action/ressource/destinataire.
+        return [_action_to_row(r) for r in self.list_actions(status)]
 
     def list_events(self, action_id: str | None = None) -> list[Event]:
         params = {"action_id": action_id} if action_id else None
@@ -224,10 +197,10 @@ class HttpClient:
         resp.raise_for_status()
         return resp.text
 
-    def list_pending_approvals(self) -> list[ApprovalRequest]:
+    def list_pending_approvals(self) -> list[ApprovalView]:
         resp = self._client.get("/v1/approvals", params={"status": "pending"})
         resp.raise_for_status()
-        return [ApprovalRequest.model_validate(item) for item in resp.json()]
+        return [ApprovalView.model_validate(item) for item in resp.json()]
 
     def decide(self, approval_id: str, decision: str, justification: str) -> dict:
         resp = self._client.post(

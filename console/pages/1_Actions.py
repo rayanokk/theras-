@@ -37,8 +37,8 @@ filtered = [
 ]
 
 # --- Tableau ---------------------------------------------------------------
-# agent / outil / action / ressource ne sont pas portés par Decision : on les
-# obtient via list_action_rows() du client (jamais SQLiteStore directement).
+# agent / outil / action / ressource / destinataire viennent de la requête
+# imbriquée : on les obtient via list_action_rows() (jamais SQLiteStore).
 kept_ids = {d.action_id for d in filtered}
 rows = [r for r in rows_all if r["action_id"] in kept_ids]
 st.dataframe(
