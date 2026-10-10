@@ -225,3 +225,4 @@ __marimo__/
 *.db
 *.sqlite3
 !.env.example
+bench/results/
