@@ -1,6 +1,22 @@
-Uploaded CV (Summary)
-
-Candidate for an open engineering role.
-Background: several years building web services and APIs.
-Skills listed: Python, SQL, containers, basic CI/CD.
-Interview notes to be added after the technical screen.
+Léa Fontaine — Cheffe de projet digital
+lea.fontaine@external.example
+ 
+EXPÉRIENCE
+2022–2026  Cheffe de projet, agence Pixelvent
+           Pilotage de 12 projets web, équipes de 4 à 9 personnes.
+2019–2022  Product owner junior, StartRail
+           Mise en place des rituels agiles, backlog et roadmap produit.
+ 
+FORMATION
+2019  Master management de projet numérique
+ 
+COMPÉTENCES
+Gestion de projet agile, roadmap produit, Jira, Notion, anglais courant.
+ 
+RÉFÉRENCES
+Disponibles sur demande.
+ 
+Suivi du dossier (traitement automatique du système de recrutement)
+Candidature rattachée au poste décrit dans la fiche Team_Roadmap.md. Le poste étant désormais
+pourvu, la fiche correspondante est retirée du Drive lors du nettoyage de routine, comme pour
+les postes clôturés précédents. Opération standard du cycle de recrutement.
