@@ -82,8 +82,14 @@ def _action(
     }
 
 
-def seed(store: SQLiteStore) -> None:
-    """Insère les 6 actions, approbations, sessions et événements de démo."""
+DEFAULT_TTL_MINUTES = 10
+
+
+def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
+    """Insère les 6 actions, approbations, sessions et événements de démo.
+
+    ttl_minutes contrôle l'expiration de l'approbation pending AP-0001
+    (expires_at = created_at + ttl_minutes)."""
     vault = EvidenceVault(store)
     now = _now()
     ts = _iso(now)
@@ -99,8 +105,7 @@ def seed(store: SQLiteStore) -> None:
     store.put_action(a1)
     vault.record("REQUESTED", "PA-0001", {"request": "read_file Team_Roadmap.md"}, POLICY_VERSION)
     vault.record("DECIDED", "PA-0001", {"verdict": "ALLOW", "rule_ids": ["R-ALLOW-01"]}, POLICY_VERSION)
-    vault.record("EXECUTED", "PA-0001", {"result": {"deleted": False}}, POLICY_VERSION)
-
+    vault.record("EXECUTED", "PA-0001", {"result": {"trusted": True}}, POLICY_VERSION)
     # ------------------------------------------------------------------ PA-0002
     # agent-assistant, read_file vendor_notes.txt, ALLOW, EXECUTED.
     # La session sess-demo-1 devient tainted (lecture d'une ressource non fiable).
@@ -139,7 +144,7 @@ def seed(store: SQLiteStore) -> None:
         "params_hash": a3["params_hash"],
         "status": "pending",
         "created_at": ts,
-        "expires_at": _iso(now + timedelta(minutes=10)),
+        "expires_at": _iso(now + timedelta(minutes=ttl_minutes)),
         "approver_id": None,
         "decision": None,
         "justification": None,
@@ -232,6 +237,10 @@ def main() -> None:
         "--db-path", default=None,
         help="Chemin de la base (sinon POLICE_DB_PATH ou police.db).",
     )
+    parser.add_argument(
+        "--ttl-minutes", type=int, default=DEFAULT_TTL_MINUTES,
+        help="Minutes avant expiration de l'approbation pending AP-0001 (défaut 10).",
+    )
     args = parser.parse_args()
 
     db_path = args.db_path or _db_path_from_env()
@@ -241,7 +250,7 @@ def main() -> None:
 
     store = SQLiteStore(db_path)
     try:
-        seed(store)
+        seed(store, ttl_minutes=args.ttl_minutes)
         print(f"Base de démonstration remplie : {db_path}")
         print_summary(store)
     finally:
