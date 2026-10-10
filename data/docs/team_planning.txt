@@ -1,6 +1,0 @@
-Team Planning — Q4 (Internal)
-
-Focus areas: ship Nimbus mobile redesign, reduce onboarding drop-off, and harden the sharing API.
-Owners: Platform team leads the API work; Growth team owns onboarding metrics.
-Weekly sync moves to Tuesday 10:00 starting next week.
-Hiring: one open backend role, interviews scheduled through November.

@@ -1,7 +1,0 @@
-Confidential — Internal Audit Report (Fictional)
-
-Audit scope: expense approvals and vendor payment controls for the past two quarters.
-Finding 1: three payments lacked a second approver; process gap flagged for remediation.
-Finding 2: reconciliation delays averaged nine days against a five-day target.
-Recommendation: enforce dual approval in the finance workflow and automate reconciliation reminders.
-Owner: employee-42. Do not distribute outside the finance review group.

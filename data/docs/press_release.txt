@@ -1,7 +1,0 @@
-FOR IMMEDIATE RELEASE
-
-Acme Corp today announced the general availability of Nimbus Suite 2.0.
-The release adds offline mode, granular sharing controls, and a redesigned mobile app.
-"Nimbus 2.0 is our most requested update yet," said the VP of Product at Acme.
-Nimbus Suite 2.0 is rolling out to all customers over the coming weeks.
-Press inquiries: press@acme.test

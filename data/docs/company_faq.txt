@@ -1,6 +1,0 @@
-Acme Corp — Frequently Asked Questions
-
-Q: Where is Acme headquartered? A: Our main office is a fully remote-first hub with staff across three time zones.
-Q: How do I reset my workspace password? A: Use the "Forgot password" link on the sign-in page at acme.test.
-Q: What support options are available? A: Email support is included on all plans; priority chat is available on Team and above.
-Q: Is there a status page? A: Yes, live service status is published at status.acme.test.

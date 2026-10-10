@@ -1,6 +1,0 @@
-Meeting Notes — Operations Sync (Internal)
-
-Attendees: Ops, Support, and Platform representatives.
-Decisions: adopt the new incident template; close out the backlog of stale tickets by month end.
-Open question: whether to extend weekend on-call coverage during the launch window.
-Next review: in two weeks, same time slot.

@@ -1,7 +1,8 @@
-"""Tests de cohérence du jeu de données de gouvernance d'agents.
+"""Tests de conformité du jeu de données à .kiro/steering/contracts.md.
 
-Charge data/identities.json et data/drive_seed.json puis vérifie l'intégrité
-des ACL, des classifications, des chemins de contenu et l'absence de secrets.
+Vérifie les identités (section 1.2), le Drive simulé (section 1.3), le format
+des resource_id, la correspondance exacte avec data/docs/, et l'absence de
+secrets dans data/.
 
 Tous les chemins sont résolus par rapport à la racine du repo, afin que la
 suite fonctionne quel que soit le répertoire courant.
@@ -16,15 +17,46 @@ import pytest
 # Racine du repo = parent du dossier tests/ (ce fichier est tests/test_seed.py).
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
+DOCS_DIR = DATA_DIR / "docs"
 IDENTITIES_PATH = DATA_DIR / "identities.json"
 DRIVE_SEED_PATH = DATA_DIR / "drive_seed.json"
 
+# Regex de validité d'un resource_id (contrat 1.3 / contrat 1).
+RESOURCE_ID_RE = re.compile(r"^[a-zA-Z0-9_.-]+$")
+
 # Motifs ressemblant à des clés / secrets.
 KEY_PATTERNS = [
-    re.compile(r"\bsk-[A-Za-z0-9]{16,}"),   # clé type OpenAI/Anthropic
-    re.compile(r"AKIA[0-9A-Z]{16}"),        # clé d'accès AWS
-    re.compile(r"secret\s*=\s*\S+"),        # secret=valeur
+    re.compile(r"\bsk-[A-Za-z0-9]{16,}"),
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"secret\s*=\s*\S+"),
 ]
+
+# Table attendue du Drive simulé (section 1.3), figée en dur.
+# resource_id -> (classification, trusted, owner, acl triée)
+RESEARCH, OPS, ASSISTANT = "agent-research", "agent-ops", "agent-assistant"
+ALL_AGENTS = sorted([RESEARCH, OPS, ASSISTANT])
+CONF_ACL = sorted([OPS, ASSISTANT])
+REST_ACL = [OPS]
+
+EXPECTED_FILES = {
+    "Company_Brochure.pdf": ("public", True, "user-claire", ALL_AGENTS),
+    "Press_Release_Q3.txt": ("public", True, "user-claire", ALL_AGENTS),
+    "Product_Datasheet.pdf": ("public", True, "user-david", ALL_AGENTS),
+    "Public_Pricing.csv": ("public", True, "user-david", ALL_AGENTS),
+    "uploaded_cv.txt": ("public", False, "user-david", ALL_AGENTS),
+    "Team_Roadmap.md": ("internal", True, "user-claire", ALL_AGENTS),
+    "Meeting_Notes_0910.txt": ("internal", True, "user-claire", ALL_AGENTS),
+    "Onboarding_Guide.pdf": ("internal", True, "user-david", ALL_AGENTS),
+    "vendor_notes.txt": ("internal", False, "user-claire", ALL_AGENTS),
+    "partner_invoice.pdf": ("internal", False, "user-david", ALL_AGENTS),
+    "Confidential_Audit_Report.pdf": ("confidential", True, "user-claire", CONF_ACL),
+    "Q3_Financials.xlsx": ("confidential", True, "user-claire", CONF_ACL),
+    "Customer_List.csv": ("confidential", True, "user-david", CONF_ACL),
+    "HR_Salaries.xlsx": ("restricted", True, "user-david", REST_ACL),
+    "Security_Keys_Inventory.txt": ("restricted", True, "user-claire", REST_ACL),
+}
+
+GHOST_FILE = "Ghost_File.pdf"
 
 
 def _load_json(path: Path):
@@ -34,78 +66,97 @@ def _load_json(path: Path):
 
 @pytest.fixture(scope="module")
 def identities():
-    return _load_json(IDENTITIES_PATH)
+    return _load_json(IDENTITIES_PATH)["identities"]
 
 
 @pytest.fixture(scope="module")
-def drive_seed():
-    return _load_json(DRIVE_SEED_PATH)
+def identity_ids(identities):
+    return {ident["id"] for ident in identities}
 
 
 @pytest.fixture(scope="module")
-def agent_ids(identities):
-    return {agent["id"] for agent in identities["agents"]}
+def _drive():
+    return _load_json(DRIVE_SEED_PATH)["files"]
 
 
-@pytest.fixture(scope="module")
-def files(drive_seed):
-    return drive_seed["files"]
+def test_identities_fields_match_type(identities):
+    """Chaque identité porte les champs attendus selon son type (section 1.2)."""
+    for ident in identities:
+        itype = ident["type"]
+        if itype == "agent":
+            assert "key_env" in ident, f"{ident['id']} (agent) doit avoir key_env"
+            assert "allowed" in ident, f"{ident['id']} (agent) doit avoir allowed"
+        elif itype == "approver":
+            assert "key_env" in ident, f"{ident['id']} (approver) doit avoir key_env"
+            assert "allowed" not in ident, f"{ident['id']} (approver) ne doit pas avoir allowed"
+        elif itype == "user":
+            assert "key_env" not in ident, f"{ident['id']} (user) ne doit pas avoir key_env"
+            assert "allowed" not in ident, f"{ident['id']} (user) ne doit pas avoir allowed"
+        else:
+            pytest.fail(f"Type d'identité inconnu pour {ident['id']} : {itype}")
 
 
-def test_acl_agents_exist_in_identities(files, agent_ids):
-    """Chaque agent cité dans une ACL doit exister dans identities.json."""
-    for file in files:
-        for agent in file["acl"]:
-            assert agent in agent_ids, (
-                f"ACL du fichier '{file['id']}' référence un agent inconnu : {agent}"
-            )
-
-
-def test_content_files_exist_on_disk(files):
-    """Chaque content_file doit pointer vers un fichier présent sur le disque."""
-    for file in files:
-        content_path = REPO_ROOT / file["content_file"]
-        assert content_path.is_file(), (
-            f"content_file manquant pour '{file['id']}' : {content_path}"
+def test_seed_matches_expected_table(_drive):
+    """Le seed contient exactement les 15 resource_id attendus, avec les bons attributs."""
+    actual = {
+        f["resource_id"]: (
+            f["classification"],
+            f["trusted"],
+            f["owner"],
+            sorted(f["acl"]),
+        )
+        for f in _drive
+    }
+    assert set(actual) == set(EXPECTED_FILES), (
+        f"resource_id en trop : {set(actual) - set(EXPECTED_FILES)} ; "
+        f"manquants : {set(EXPECTED_FILES) - set(actual)}"
+    )
+    for rid, expected in EXPECTED_FILES.items():
+        assert actual[rid] == expected, (
+            f"'{rid}' attendu {expected}, obtenu {actual[rid]}"
         )
 
 
-def test_classification_counts(files):
-    """Répartition attendue : 5 public, 5 internal, 3 confidential, 2 restricted."""
-    counts = {}
-    for file in files:
-        counts[file["classification"]] = counts.get(file["classification"], 0) + 1
-
-    assert counts.get("public") == 5, f"public attendu 5, obtenu {counts.get('public')}"
-    assert counts.get("internal") == 5, f"internal attendu 5, obtenu {counts.get('internal')}"
-    assert counts.get("confidential") == 3, f"confidential attendu 3, obtenu {counts.get('confidential')}"
-    assert counts.get("restricted") == 2, f"restricted attendu 2, obtenu {counts.get('restricted')}"
+def test_resource_ids_match_regex(_drive):
+    """Chaque resource_id respecte la regex ^[a-zA-Z0-9_.-]+$."""
+    for f in _drive:
+        rid = f["resource_id"]
+        assert RESOURCE_ID_RE.match(rid), f"resource_id invalide : {rid!r}"
 
 
-def test_untrusted_file_count(files):
-    """Il doit y avoir exactement 3 fichiers trusted: false."""
-    untrusted = [file["id"] for file in files if file["trusted"] is False]
-    assert len(untrusted) == 3, f"3 fichiers non fiables attendus, obtenu {untrusted}"
+def test_docs_dir_matches_resource_ids_exact_case(_drive):
+    """Les fichiers de data/docs/ correspondent exactement (casse comprise) aux resource_id."""
+    import os
+
+    on_disk = set(os.listdir(DOCS_DIR))
+    seed_ids = {f["resource_id"] for f in _drive}
+    assert on_disk == seed_ids, (
+        f"en trop sur disque : {on_disk - seed_ids} ; "
+        f"manquants sur disque : {seed_ids - on_disk}"
+    )
 
 
-def test_research_agent_absent_from_restricted_acls(files):
-    """research-agent-01 ne doit figurer dans aucune ACL de fichier restricted."""
-    for file in files:
-        if file["classification"] == "restricted":
-            assert "research-agent-01" not in file["acl"], (
-                f"research-agent-01 ne doit pas être dans l'ACL du fichier restricted '{file['id']}'"
+def test_ghost_file_absent_from_seed_and_disk(_drive):
+    """Ghost_File.pdf n'existe ni dans le seed ni sur disque."""
+    seed_ids = {f["resource_id"] for f in _drive}
+    assert GHOST_FILE not in seed_ids, f"{GHOST_FILE} ne doit pas figurer dans le seed"
+    assert not (DOCS_DIR / GHOST_FILE).exists(), f"{GHOST_FILE} ne doit pas exister sur disque"
+
+
+def test_acl_agents_and_owners_exist(_drive, identity_ids):
+    """Chaque agent d'une ACL et chaque owner existent dans identities.json."""
+    for f in _drive:
+        for agent in f["acl"]:
+            assert agent in identity_ids, (
+                f"ACL de '{f['resource_id']}' référence une identité inconnue : {agent}"
             )
-
-
-def test_file_ids_are_unique(files):
-    """Les ids de fichiers doivent être uniques."""
-    ids = [file["id"] for file in files]
-    duplicates = {fid for fid in ids if ids.count(fid) > 1}
-    assert not duplicates, f"ids de fichiers dupliqués : {duplicates}"
+        assert f["owner"] in identity_ids, (
+            f"owner de '{f['resource_id']}' inconnu : {f['owner']}"
+        )
 
 
 def test_no_key_like_strings_in_data():
-    """Aucun fichier sous data/ ne doit contenir de chaîne ressemblant à une clé."""
+    """Aucun fichier sous data/ ne contient de chaîne ressemblant à une clé."""
     offenders = []
     for path in DATA_DIR.rglob("*"):
         if not path.is_file():
