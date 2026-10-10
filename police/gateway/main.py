@@ -15,6 +15,7 @@ import os
 
 from dotenv import load_dotenv
 
+from police.approvals.service import ApprovalService
 from police.connectors.drive_mock import DriveMock
 from police.connectors.mail_mock import MailMock
 from police.evidence.vault import EvidenceVault
@@ -47,4 +48,6 @@ pipeline = Pipeline(
     risk_scorer=None,
 )
 
-app = create_app(pipeline, store, vault, identities)
+approvals = ApprovalService(store, vault, pipeline, identities)
+
+app = create_app(pipeline, store, vault, identities, approvals)

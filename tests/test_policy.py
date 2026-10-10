@@ -208,7 +208,25 @@ def test_default_deny_when_no_rule_matches(policy):
     )
     verdict, rule_ids, _ = evaluate(facts, policy)
     assert verdict == "DENY"
-    assert rule_ids == ["DEFAULT-DENY"]
+    assert rule_ids == ["R-DENY-DEFAULT"]
+
+
+def test_default_deny_returns_explicit_id_and_reason(policy):
+    # share_file d'un fichier internal vers external.example : identite et
+    # ressource OK, mais aucune ALLOW ne couvre ce cas -> refus par defaut
+    # explicite (verdict, rule_ids et reasons precis).
+    facts = _share(
+        base_facts(),
+        "internal",
+        recipient_internal=False,
+        recipient_partner=False,
+    )
+    verdict, rule_ids, reasons = evaluate(facts, policy)
+    assert verdict == "DENY"
+    assert rule_ids == ["R-DENY-DEFAULT"]
+    assert reasons == [
+        "Aucune règle n'autorise explicitement cette action (refus par défaut)"
+    ]
 
 
 def test_deny_wins_over_review(policy):
@@ -256,7 +274,7 @@ def test_missing_fact_makes_condition_false_without_error(policy):
     }
     verdict, rule_ids, _ = evaluate(facts, policy)
     assert verdict == "DENY"
-    assert rule_ids == ["DEFAULT-DENY"]
+    assert rule_ids == ["R-DENY-DEFAULT"]
 
 
 # --- Demo phare ---------------------------------------------------------------

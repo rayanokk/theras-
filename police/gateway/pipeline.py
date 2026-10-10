@@ -17,6 +17,7 @@ R-DENY-06 trace dans le Vault (regle d'or 8).
 from __future__ import annotations
 
 import hashlib
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -29,6 +30,7 @@ from contracts.models import (
     canonical_json,
     params_hash,
 )
+from police.approvals.service import new_approval
 from police.connectors.base import Connector
 from police.evidence.vault import EvidenceVault
 from police.identity import IdentityRegistry
@@ -70,6 +72,11 @@ class Pipeline:
         count = len(self._store.list_actions())
         return f"PA-{count + 1:04d}"
 
+    def _next_approval_id(self) -> str:
+        """AP-0001, AP-0002... compteur base sur le nombre d'approbations."""
+        count = len(self._store.list_approvals())
+        return f"AP-{count + 1:04d}"
+
     # ----------------------------------------------------------------- helpers
 
     @staticmethod
@@ -107,6 +114,169 @@ class Pipeline:
             return request, False
         return request, True
 
+    # ------------------------------------------------------------------ facts
+
+    def _gather_facts(
+        self, request: ActionRequest | None, identity: dict | None
+    ) -> tuple[dict[str, Any], Any, list[str]]:
+        """Calcule les faits sur l'etat COURANT (jamais le scoreur de risque).
+
+        `identity` est l'identite deja resolue (par la cle API, ou par get() lors
+        d'une revalidation). Renvoie (facts, resource_info, taint_sources).
+        `params_valid` n'est pas pose ici : c'est a l'appelant de le fixer.
+        """
+        identity_ok = False
+        if identity is not None and identity.get("type") == "agent":
+            declared = request.agent_id if request is not None else None
+            identity_ok = declared is None or declared == identity["id"]
+
+        # Explicabilite : un fait non verifie est ABSENT du dict (ni False ni
+        # None), pour que le moteur ne declenche pas une regle DENY a cote. Ainsi
+        # action_allowed n'est pose que si l'identite est bonne, et resource_ok
+        # seulement si l'identite ET le droit le sont.
+        facts: dict[str, Any] = {
+            "identity_ok": identity_ok,
+            "has_recipient": False,
+            "recipient_internal": False,
+            "recipient_partner": False,
+            "recipient_blocked": False,
+            "sensitive": False,
+            "session_tainted": False,
+            "risk_unavailable": False,
+        }
+
+        resource_info = None
+        taint_sources: list[str] = []
+        if request is None:
+            return facts, resource_info, taint_sources
+
+        action = request.action.value
+        tool = request.tool.value
+        facts["action"] = action
+        facts["sensitive"] = action in SENSITIVE_ACTIONS
+
+        # action_allowed n'est pose que si l'identite est verifiee.
+        if identity_ok and identity is not None:
+            allowed = identity.get("allowed", {}) or {}
+            facts["action_allowed"] = action in allowed.get(tool, [])
+
+        # describe + resource_ok seulement si identite ET droit sont verifies.
+        if facts.get("identity_ok") and facts.get("action_allowed"):
+            connector = self._connectors.get(tool)
+            if connector is None:
+                # Connecteur introuvable : fail closed.
+                facts["resource_ok"] = False
+            else:
+                try:
+                    resource_info = connector.describe(
+                        action, request.resource_id, request.parameters
+                    )
+                except Exception:
+                    # describe ne doit jamais faire planter le pipeline :
+                    # ressource consideree indisponible -> DENY R-DENY-03.
+                    resource_info = None
+                    facts["resource_ok"] = False
+                if resource_info is not None:
+                    facts["classification"] = resource_info.classification.value
+                    in_acl = (
+                        identity["id"] in resource_info.acl if identity else False
+                    )
+                    exempt = (action, request.resource_id) in EXEMPT_PAIRS
+                    facts["resource_ok"] = resource_info.exists and (exempt or in_acl)
+                    if resource_info.recipient_domain is not None:
+                        facts["has_recipient"] = True
+                        facts.update(
+                            recipient_facts(
+                                resource_info.recipient_domain, self._policy
+                            )
+                        )
+                facts["session_tainted"] = self._taint.is_tainted(request.session_id)
+
+        taint_sources = self._taint.taint_sources(request.session_id)
+        return facts, resource_info, taint_sources
+
+    # ---------------------------------------------------------------- execute
+
+    def _execute(
+        self, action_id: str, request: ActionRequest
+    ) -> tuple[str, dict | None]:
+        """Execute l'action approuvee/autorisee. Renvoie (status, result).
+
+        Journalise EXECUTED ou BLOCKED dans le Vault et marque la session si un
+        read_file renvoie une ressource non fiable. N'ecrit PAS APPROVAL_DECIDED.
+        """
+        policy_version = self._policy.version
+        connector = self._connectors[request.tool.value]
+        try:
+            result = connector.execute(
+                request.action.value, request.resource_id, request.parameters
+            )
+            self._vault.record(
+                "EXECUTED", action_id, {"result": result}, policy_version
+            )
+            # Taint apres une lecture reussie d'une ressource non fiable.
+            if (
+                request.action.value == "read_file"
+                and isinstance(result, dict)
+                and result.get("trusted") is False
+            ):
+                self._taint.mark(request.session_id, request.resource_id)
+            return "EXECUTED", result
+        except Exception as exc:
+            self._vault.record(
+                "BLOCKED", action_id, {"error": str(exc)}, policy_version
+            )
+            return "FAILED", None
+
+    # -------------------------------------------------------------- approvals
+
+    def revalidate(
+        self, action: dict, approval
+    ) -> tuple[bool, list[str], list[str]]:
+        """Rejoue tout le controle sur l'etat courant avant d'executer un approuve.
+
+        Renvoie (ok, rule_ids, reasons). ok=False si les parametres ont change
+        depuis la demande, ou si l'etat actuel donne un verdict DENY (y compris
+        le refus par defaut R-DENY-DEFAULT). Le scoreur de risque n'est jamais appele.
+        """
+        approval_hash = (
+            approval.params_hash
+            if hasattr(approval, "params_hash")
+            else approval["params_hash"]
+        )
+
+        # Fail closed : une requete stockee illisible ne doit pas faire planter
+        # le service d'approbation, elle est refusee proprement.
+        try:
+            request = ActionRequest.model_validate(action["request"])
+        except Exception:
+            return False, ["INVALID_REQUEST"], ["Requête stockée illisible"]
+
+        if params_hash(request) != approval_hash:
+            return (
+                False,
+                ["PARAMS_CHANGED"],
+                ["Les paramètres ont changé depuis la demande d'approbation"],
+            )
+
+        identity = self._identities.get(action.get("agent_id"))
+        facts, _resource_info, _taint_sources = self._gather_facts(request, identity)
+        facts["params_valid"] = True
+
+        verdict, rule_ids, reasons = evaluate(facts, self._policy)
+        if verdict == "DENY":
+            return False, rule_ids, reasons
+        return True, [], []
+
+    def execute_approved(self, action: dict) -> tuple[str, dict | None]:
+        """Execute une action approuvee et revalidee. Renvoie (status, result).
+
+        Les evenements APPROVAL_DECIDED relevent du service d'approbation, pas
+        d'ici : cette methode ne journalise que EXECUTED ou BLOCKED via _execute.
+        """
+        request = ActionRequest.model_validate(action["request"])
+        return self._execute(action["action_id"], request)
+
     # ------------------------------------------------------------------- handle
 
     def handle(self, raw_body: Any, api_key: str | None) -> Decision:
@@ -124,71 +294,10 @@ class Pipeline:
         # 2. Validation (jamais d'exception qui remonte).
         request, params_valid = self._validate(raw_body)
 
-        # 3. Faits d'identite et d'autorisation.
+        # 3. Faits : identite resolue par la cle, puis faits sur l'etat courant.
         identity = self._identities.resolve(api_key)
-        identity_ok = False
-        action_allowed = False
-        if identity is not None and identity.get("type") == "agent":
-            declared = request.agent_id if request is not None else None
-            identity_ok = declared is None or declared == identity["id"]
-
-        facts: dict[str, Any] = {
-            "params_valid": params_valid,
-            "identity_ok": identity_ok,
-            "resource_ok": False,
-            "action_allowed": False,
-            "has_recipient": False,
-            "recipient_internal": False,
-            "recipient_partner": False,
-            "recipient_blocked": False,
-            "sensitive": False,
-            "session_tainted": False,
-            "risk_unavailable": False,
-        }
-
-        resource_info = None
-        if request is not None:
-            action = request.action.value
-            tool = request.tool.value
-            facts["action"] = action
-            facts["sensitive"] = action in SENSITIVE_ACTIONS
-
-            # action_allowed : l'action est dans les droits de l'agent pour l'outil.
-            if identity_ok and identity is not None:
-                allowed = identity.get("allowed", {}) or {}
-                action_allowed = action in allowed.get(tool, [])
-            facts["action_allowed"] = action_allowed
-
-            # describe + faits de ressource seulement si validation et identite OK.
-            if params_valid and identity_ok and action_allowed:
-                connector = self._connectors.get(tool)
-                if connector is not None:
-                    try:
-                        resource_info = connector.describe(
-                            action, request.resource_id, request.parameters
-                        )
-                    except Exception:
-                        # describe ne doit jamais faire planter le pipeline :
-                        # ressource consideree indisponible -> DENY R-DENY-03.
-                        resource_info = None
-                        facts["resource_ok"] = False
-                    if resource_info is not None:
-                        facts["classification"] = resource_info.classification.value
-                        in_acl = (
-                            identity["id"] in resource_info.acl if identity else False
-                        )
-                        exempt = (action, request.resource_id) in EXEMPT_PAIRS
-                        facts["resource_ok"] = resource_info.exists and (
-                            exempt or in_acl
-                        )
-                        if resource_info.recipient_domain is not None:
-                            facts["has_recipient"] = True
-                            facts.update(
-                                recipient_facts(
-                                    resource_info.recipient_domain, self._policy
-                                )
-                            )
-                    facts["session_tainted"] = self._taint.is_tainted(request.session_id)
+        facts, resource_info, taint_sources = self._gather_facts(request, identity)
+        facts["params_valid"] = params_valid
 
         # 4. Premiere evaluation.
         verdict, rule_ids, reasons = evaluate(facts, self._policy)
@@ -196,6 +305,7 @@ class Pipeline:
         # 5. Risque : uniquement si le verdict n'est pas DENY et qu'un scoreur existe.
         risk: RiskSignal | None = None
         if verdict != "DENY" and self._risk_scorer is not None and request is not None:
+            started = time.monotonic()
             try:
                 risk = self._risk_scorer(
                     request, resource_info, facts["session_tainted"]
@@ -204,17 +314,23 @@ class Pipeline:
                     facts["risk_score"] = risk.score
                 if risk is not None and risk.source.value == "llm_unavailable":
                     facts["risk_unavailable"] = True
-            except Exception:
+            except Exception as exc:
+                # Fail closed : un scoreur qui plante devient "indisponible", ce
+                # qui durcit toute action sensible en REVIEW (R-REV-04).
+                elapsed_ms = int((time.monotonic() - started) * 1000)
+                risk = RiskSignal(
+                    score=None,
+                    signals=[f"scorer_error: {type(exc).__name__}"],
+                    source="llm_unavailable",
+                    summary=None,
+                    latency_ms=elapsed_ms,
+                )
                 facts["risk_unavailable"] = True
-                risk = None
             verdict, rule_ids, reasons = evaluate(facts, self._policy)
 
         # 6. params_hash + DECIDED.
         phash = self._safe_params_hash(request, raw_body)
         session_id = request.session_id if request is not None else None
-        taint_sources = (
-            self._taint.taint_sources(session_id) if session_id is not None else []
-        )
         risk_payload = risk.model_dump(mode="json") if risk is not None else None
         self._vault.record(
             "DECIDED",
@@ -237,29 +353,18 @@ class Pipeline:
         approval_id: str | None = None
 
         if verdict == "ALLOW":
-            connector = self._connectors[request.tool.value]
-            try:
-                result = connector.execute(
-                    request.action.value, request.resource_id, request.parameters
-                )
-                status = "EXECUTED"
-                self._vault.record(
-                    "EXECUTED", action_id, {"result": result}, policy_version
-                )
-                # Taint apres une lecture reussie d'une ressource non fiable.
-                if (
-                    request.action.value == "read_file"
-                    and isinstance(result, dict)
-                    and result.get("trusted") is False
-                ):
-                    self._taint.mark(request.session_id, request.resource_id)
-            except Exception as exc:
-                status = "FAILED"
-                self._vault.record(
-                    "BLOCKED", action_id, {"error": str(exc)}, policy_version
-                )
+            status, result = self._execute(action_id, request)
         elif verdict == "REVIEW":
             status = "PENDING_REVIEW"
+            # Cree l'approbation liee au params_hash de cette decision.
+            approval_id = self._next_approval_id()
+            approval = new_approval(
+                approval_id=approval_id,
+                action_id=action_id,
+                params_hash=phash,
+                now=datetime.now(timezone.utc),
+            )
+            self._store.put_approval(approval.model_dump(mode="json"))
         else:  # DENY
             status = "DENIED"
             self._vault.record(
