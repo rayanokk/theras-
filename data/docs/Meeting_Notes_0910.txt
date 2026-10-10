@@ -1,0 +1,6 @@
+Meeting Notes — September 10 (Internal)
+
+Attendees: operations, support, and platform leads.
+Decided to adopt a shared incident template and close stale tickets by month end.
+Open question on extending weekend coverage during the launch window.
+Next sync in two weeks.
