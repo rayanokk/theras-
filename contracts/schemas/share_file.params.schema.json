@@ -1,0 +1,29 @@
+{
+  "$defs": {
+    "Role": {
+      "enum": [
+        "reader",
+        "writer"
+      ],
+      "title": "Role",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "recipient": {
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+      "title": "Recipient",
+      "type": "string"
+    },
+    "role": {
+      "$ref": "#/$defs/Role"
+    }
+  },
+  "required": [
+    "recipient",
+    "role"
+  ],
+  "title": "ShareFileParams",
+  "type": "object"
+}

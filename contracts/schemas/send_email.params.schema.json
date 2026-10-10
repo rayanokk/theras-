@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "to": {
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+      "title": "To",
+      "type": "string"
+    },
+    "subject": {
+      "title": "Subject",
+      "type": "string"
+    },
+    "body": {
+      "title": "Body",
+      "type": "string"
+    }
+  },
+  "required": [
+    "to",
+    "subject",
+    "body"
+  ],
+  "title": "SendEmailParams",
+  "type": "object"
+}
