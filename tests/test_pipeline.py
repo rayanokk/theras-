@@ -376,3 +376,91 @@ def test_risk_scorer_not_called_when_deny(ctx):
     decision = pipe.handle(_read("Company_Brochure.pdf"), "wrong-key")
     assert decision.verdict == "DENY"
     assert calls == []
+
+
+# --- Taint lie a l'identite reelle : resiste au changement de session ---------
+
+
+def test_agent_taint_crosses_sessions(ctx):
+    # agent-assistant lit un document non fiable dans sess-1, puis partage un
+    # fichier INTERNAL vers un destinataire interne dans sess-2 (session saine).
+    # Normalement ALLOW (R-ALLOW-04), durci en REVIEW par R-REV-02 car l'identite
+    # reelle reste contaminee, quel que soit le session_id fourni par l'agent.
+    pipe = ctx.make()
+    r = pipe.handle(
+        _read("vendor_notes.txt", session="sess-1", agent_id="agent-assistant"),
+        KEY_ASSISTANT,
+    )
+    assert r.verdict == "ALLOW"
+
+    decision = pipe.handle(
+        _share(
+            "agent-assistant",
+            "Team_Roadmap.md",
+            "colleague@acme.example",
+            session="sess-2",
+        ),
+        KEY_ASSISTANT,
+    )
+    assert decision.verdict == "REVIEW"
+    assert decision.rule_ids == ["R-ALLOW-04", "R-REV-02"]
+    stored = ctx.store.get_action(decision.action_id)
+    assert "vendor_notes.txt" in stored["taint_sources"]
+
+
+def test_other_agent_not_tainted_by_someone_else(ctx):
+    # agent-assistant se contamine ; agent-ops, jamais contamine, partage le meme
+    # fichier dans une session neuve -> ALLOW (le taint d'un agent ne touche pas
+    # les autres).
+    pipe = ctx.make()
+    pipe.handle(
+        _read("vendor_notes.txt", session="sess-1", agent_id="agent-assistant"),
+        KEY_ASSISTANT,
+    )
+    decision = pipe.handle(
+        _share(
+            "agent-ops",
+            "Team_Roadmap.md",
+            "colleague@acme.example",
+            session="sess-ops",
+        ),
+        KEY_OPS,
+    )
+    assert decision.verdict == "ALLOW"
+    assert "R-ALLOW-04" in decision.rule_ids
+
+
+def test_flagship_demo_single_session_still_review(ctx):
+    # La demo phare dans une seule session donne toujours R-REV-01 et R-REV-02.
+    pipe = ctx.make()
+    pipe.handle(
+        _read("vendor_notes.txt", session="sess-1", agent_id="agent-assistant"),
+        KEY_ASSISTANT,
+    )
+    decision = pipe.handle(
+        _share(
+            "agent-assistant",
+            "Confidential_Audit_Report.pdf",
+            "audit@external.example",
+            session="sess-1",
+        ),
+        KEY_ASSISTANT,
+    )
+    assert decision.verdict == "REVIEW"
+    assert "R-REV-01" in decision.rule_ids
+    assert "R-REV-02" in decision.rule_ids
+
+
+def test_read_in_tainted_session_stays_allow(ctx):
+    # Lire n'est pas une action sensible : meme contamine, un read reste ALLOW.
+    pipe = ctx.make()
+    pipe.handle(
+        _read("vendor_notes.txt", session="sess-1", agent_id="agent-assistant"),
+        KEY_ASSISTANT,
+    )
+    decision = pipe.handle(
+        _read("Company_Brochure.pdf", session="sess-1", agent_id="agent-assistant"),
+        KEY_ASSISTANT,
+    )
+    assert decision.verdict == "ALLOW"
+    assert "R-ALLOW-01" in decision.rule_ids

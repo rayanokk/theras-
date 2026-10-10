@@ -186,6 +186,27 @@ def test_r_rev_02_tainted_sensitive(policy):
     assert "R-REV-02" in rule_ids
 
 
+def test_r_rev_02_agent_tainted_sensitive(policy):
+    # Agent contamine (session saine) : R-REV-02 se declenche aussi via agent_tainted.
+    facts = _share(base_facts(), "public", recipient_internal=True)
+    facts["session_tainted"] = False
+    facts["agent_tainted"] = True
+    verdict, rule_ids, _ = evaluate(facts, policy)
+    assert verdict == "REVIEW"
+    assert "R-REV-02" in rule_ids
+
+
+def test_r_rev_02_any_of_requires_sensitive_too(policy):
+    # any_of combine a sensitive: agent contamine mais action NON sensible
+    # (read_file) -> R-REV-02 ne se declenche pas (la condition sensible echoue).
+    facts = base_facts()  # read_file, non sensible
+    facts["agent_tainted"] = True
+    verdict, rule_ids, _ = evaluate(facts, policy)
+    assert "R-REV-02" not in rule_ids
+    # Et sans aucun taint ni risque, une lecture reste ALLOW.
+    assert verdict == "ALLOW"
+
+
 def test_r_rev_04_risk_unavailable_sensitive(policy):
     # LLM indisponible sur action sensible : ALLOW durci en REVIEW.
     facts = _share(base_facts(), "public", recipient_internal=True)

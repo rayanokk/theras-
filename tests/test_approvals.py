@@ -15,6 +15,7 @@ from police.approvals.service import (
     APPROVAL_TTL,
     ApprovalError,
     ApprovalService,
+    _ttl_from_env,
     new_approval,
 )
 from police.connectors.drive_mock import DriveMock
@@ -33,6 +34,17 @@ IDENTITIES = REPO / "data" / "identities.json"
 KEY_ASSISTANT = "k-assistant"
 KEY_ALICE = "k-alice"
 KEY_RESEARCH = "k-research"
+
+
+# --- TTL reglable mais plafonne ------------------------------------------------
+
+
+def test_ttl_from_env_bounds():
+    assert _ttl_from_env(None) == timedelta(seconds=600)
+    assert _ttl_from_env("5") == timedelta(seconds=5)
+    assert _ttl_from_env("3600") == timedelta(seconds=600)  # plafonne
+    assert _ttl_from_env("abc") == timedelta(seconds=600)  # invalide
+    assert _ttl_from_env("0") == timedelta(seconds=600)  # <= 0
 
 
 # --- Test 1 : new_approval ----------------------------------------------------

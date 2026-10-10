@@ -62,3 +62,58 @@ def test_state_persists_across_trackers_on_same_db(tmp_path):
     assert tracker_b.is_tainted("sess-1") is True
     assert tracker_b.taint_sources("sess-1") == ["vendor_notes.txt"]
     store_b.close()
+
+
+# --- Taint lie a l'identite reelle de l'agent (avec TTL) ----------------------
+
+from datetime import datetime, timedelta, timezone
+
+T0 = datetime(2026, 10, 10, 12, 0, 0, tzinfo=timezone.utc)
+TTL = 15
+
+
+def test_mark_agent_then_tainted_within_ttl(store):
+    tracker = TaintTracker(store)
+    tracker.mark_agent("agent-assistant", "vendor_notes.txt", now=T0)
+    # Juste apres, et encore a 14 minutes : contamine.
+    assert tracker.is_agent_tainted("agent-assistant", TTL, now=T0) is True
+    assert (
+        tracker.is_agent_tainted(
+            "agent-assistant", TTL, now=T0 + timedelta(minutes=14)
+        )
+        is True
+    )
+    assert tracker.agent_taint_sources("agent-assistant") == ["vendor_notes.txt"]
+
+
+def test_agent_taint_expires_after_ttl(store):
+    tracker = TaintTracker(store)
+    tracker.mark_agent("agent-assistant", "vendor_notes.txt", now=T0)
+    # A 16 minutes : expire.
+    assert (
+        tracker.is_agent_tainted(
+            "agent-assistant", TTL, now=T0 + timedelta(minutes=16)
+        )
+        is False
+    )
+
+
+def test_new_mark_agent_pushes_ttl_forward(store):
+    tracker = TaintTracker(store)
+    tracker.mark_agent("agent-assistant", "vendor_notes.txt", now=T0)
+    # Expire a 16 min...
+    later = T0 + timedelta(minutes=16)
+    assert tracker.is_agent_tainted("agent-assistant", TTL, now=later) is False
+    # ... mais un nouveau marquage repousse tainted_at : de nouveau contamine.
+    tracker.mark_agent("agent-assistant", "uploaded_cv.txt", now=later)
+    assert tracker.is_agent_tainted("agent-assistant", TTL, now=later) is True
+    assert tracker.agent_taint_sources("agent-assistant") == [
+        "vendor_notes.txt",
+        "uploaded_cv.txt",
+    ]
+
+
+def test_unknown_agent_is_not_tainted(store):
+    tracker = TaintTracker(store)
+    assert tracker.is_agent_tainted("agent-unknown", TTL, now=T0) is False
+    assert tracker.agent_taint_sources("agent-unknown") == []

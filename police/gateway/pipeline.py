@@ -190,20 +190,35 @@ class Pipeline:
                                 resource_info.recipient_domain, self._policy
                             )
                         )
+                # On ne pose les faits de taint QUE dans cette branche (identite
+                # et droit verifies), pour respecter "un fait non verifie est
+                # absent". session_tainted repose sur le session_id fourni par
+                # l'agent ; agent_tainted repose sur l'identite reelle (TTL).
                 facts["session_tainted"] = self._taint.is_tainted(request.session_id)
+                if identity is not None:
+                    facts["agent_tainted"] = self._taint.is_agent_tainted(
+                        identity["id"], self._policy.agent_taint_ttl_minutes
+                    )
 
-        taint_sources = self._taint.taint_sources(request.session_id)
+        # Sources de contamination : union sans doublon session + agent, ordre
+        # stable (sources de session d'abord, puis celles de l'agent).
+        taint_sources = list(self._taint.taint_sources(request.session_id))
+        if identity is not None:
+            for src in self._taint.agent_taint_sources(identity["id"]):
+                if src not in taint_sources:
+                    taint_sources.append(src)
         return facts, resource_info, taint_sources
 
     # ---------------------------------------------------------------- execute
 
     def _execute(
-        self, action_id: str, request: ActionRequest
+        self, action_id: str, request: ActionRequest, identity: dict | None = None
     ) -> tuple[str, dict | None]:
         """Execute l'action approuvee/autorisee. Renvoie (status, result).
 
-        Journalise EXECUTED ou BLOCKED dans le Vault et marque la session si un
-        read_file renvoie une ressource non fiable. N'ecrit PAS APPROVAL_DECIDED.
+        Journalise EXECUTED ou BLOCKED dans le Vault et marque la session (et
+        l'identite reelle si connue) si un read_file renvoie une ressource non
+        fiable. N'ecrit PAS APPROVAL_DECIDED.
         """
         policy_version = self._policy.version
         connector = self._connectors[request.tool.value]
@@ -214,13 +229,17 @@ class Pipeline:
             self._vault.record(
                 "EXECUTED", action_id, {"result": result}, policy_version
             )
-            # Taint apres une lecture reussie d'une ressource non fiable.
+            # Taint apres une lecture reussie d'une ressource non fiable :
+            # on contamine la session ET l'identite reelle (que l'agent ne peut
+            # pas changer en basculant de session).
             if (
                 request.action.value == "read_file"
                 and isinstance(result, dict)
                 and result.get("trusted") is False
             ):
                 self._taint.mark(request.session_id, request.resource_id)
+                if identity is not None:
+                    self._taint.mark_agent(identity["id"], request.resource_id)
             return "EXECUTED", result
         except Exception as exc:
             self._vault.record(
@@ -275,7 +294,10 @@ class Pipeline:
         d'ici : cette methode ne journalise que EXECUTED ou BLOCKED via _execute.
         """
         request = ActionRequest.model_validate(action["request"])
-        return self._execute(action["action_id"], request)
+        # Identite reelle retrouvee par l'agent_id stocke, pour contaminer aussi
+        # l'identite si l'action approuvee est un read_file non fiable.
+        identity = self._identities.get(action.get("agent_id"))
+        return self._execute(action["action_id"], request, identity)
 
     # ------------------------------------------------------------------- handle
 
@@ -353,7 +375,7 @@ class Pipeline:
         approval_id: str | None = None
 
         if verdict == "ALLOW":
-            status, result = self._execute(action_id, request)
+            status, result = self._execute(action_id, request, identity)
         elif verdict == "REVIEW":
             status = "PENDING_REVIEW"
             # Cree l'approbation liee au params_hash de cette decision.

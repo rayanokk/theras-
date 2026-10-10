@@ -44,6 +44,8 @@ class Policy:
     partner_domains: list[str]
     blocked_domains: list[str]
     rules: list[dict[str, Any]] = field(default_factory=list)
+    # Duree de vie du taint lie a l'identite reelle de l'agent (minutes).
+    agent_taint_ttl_minutes: int = 15
 
 
 def load_policy(path: str | Path) -> Policy:
@@ -55,6 +57,7 @@ def load_policy(path: str | Path) -> Policy:
         partner_domains=[d.lower() for d in raw.get("partner_domains", [])],
         blocked_domains=[d.lower() for d in raw.get("blocked_domains", [])],
         rules=raw.get("rules", []),
+        agent_taint_ttl_minutes=int(raw.get("agent_taint_ttl_minutes", 15)),
     )
 
 
