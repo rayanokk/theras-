@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Police Agents
+*.db
+*.sqlite3
+!.env.example
