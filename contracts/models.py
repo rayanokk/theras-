@@ -274,3 +274,41 @@ class ApprovalDecisionIn(BaseModel):
 
     decision: ApprovalDecision
     justification: str = Field(min_length=10)
+
+
+# --- Vues enrichies renvoyees a la console ------------------------------------
+# Ces modeles decrivent ce que l'API renvoie REELLEMENT (Decision/ApprovalRequest
+# enrichis par le pipeline et le service). extra="ignore" : la console tolere un
+# champ ajoute plus tard sans casser.
+
+
+class ActionRecord(Decision):
+    """Action stockee, renvoyee par GET /v1/actions et GET /v1/actions/{id}."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    agent_id: str | None = None
+    declared_agent_id: str | None = None
+    request: dict[str, Any] | None = None
+    session_id: str | None = None
+    created_at: str | None = None
+    taint_sources: list[str] = Field(default_factory=list)
+
+
+class ApprovalView(ApprovalRequest):
+    """Approbation enrichie, renvoyee par GET /v1/approvals et /v1/approvals/{id}."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    agent_id: str | None = None
+    user_id: str | None = None
+    tool: str | None = None
+    action: str | None = None
+    resource_id: str | None = None
+    reason: str | None = None
+    action_status: str | None = None
+    parameters: dict[str, Any] | None = None
+    rule_ids: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+    taint_sources: list[str] = Field(default_factory=list)
+    risk: dict[str, Any] | None = None

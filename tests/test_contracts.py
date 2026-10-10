@@ -11,8 +11,10 @@ from pydantic import ValidationError
 from contracts.models import (
     ACTION_TOOL,
     PARAMS_MODELS,
+    ActionRecord,
     ActionRequest,
     ApprovalDecisionIn,
+    ApprovalView,
     ResourceInfo,
     ShareFileParams,
     params_hash,
@@ -214,3 +216,115 @@ def test_each_action_has_a_params_model_and_a_tool():
     assert actions <= set(ACTION_TOOL)
     for action in actions:
         assert ACTION_TOOL[action] in {"google_drive", "mail"}
+
+
+# --- Vues enrichies renvoyees a la console (ActionRecord, ApprovalView) --------
+# On construit la vraie pile (pipeline + service) pour produire des reponses API
+# authentiques, puis on verifie qu'elles valident contre les modeles de vue.
+
+from pathlib import Path
+
+from police.approvals.service import ApprovalService
+from police.connectors.drive_mock import DriveMock
+from police.connectors.mail_mock import MailMock
+from police.evidence.vault import EvidenceVault
+from police.gateway.pipeline import Pipeline
+from police.identity import IdentityRegistry
+from police.policy.engine import load_policy
+from police.policy.taint import TaintTracker
+from police.store.sqlite_store import SQLiteStore
+
+_REPO = Path(__file__).resolve().parents[1]
+_KEY_ASSISTANT = "k-assistant"
+
+
+@pytest.fixture
+def api_ctx(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_KEY_RESEARCH", "k-research")
+    monkeypatch.setenv("AGENT_KEY_OPS", "k-ops")
+    monkeypatch.setenv("AGENT_KEY_ASSISTANT", _KEY_ASSISTANT)
+    monkeypatch.setenv("APPROVER_KEY_ALICE", "k-alice")
+    monkeypatch.setenv("APPROVER_KEY_BOB", "k-bob")
+
+    store = SQLiteStore(str(tmp_path / "test.db"))
+    drive = DriveMock()
+    mail = MailMock(drive)
+    vault = EvidenceVault(store)
+    policy = load_policy(_REPO / "policies" / "policies.yaml")
+    identities = IdentityRegistry(_REPO / "data" / "identities.json")
+    taint = TaintTracker(store)
+    pipeline = Pipeline(
+        policy=policy,
+        identities=identities,
+        connectors={"google_drive": drive, "mail": mail},
+        store=store,
+        vault=vault,
+        taint=taint,
+        risk_scorer=None,
+    )
+    service = ApprovalService(store, vault, pipeline, identities)
+
+    class Ctx:
+        pass
+
+    c = Ctx()
+    c.store = store
+    c.pipeline = pipeline
+    c.service = service
+    yield c
+    store.close()
+
+
+def _read_vendor():
+    return {
+        "agent_id": "agent-assistant",
+        "tool": "google_drive",
+        "action": "read_file",
+        "resource_id": "vendor_notes.txt",
+        "parameters": {},
+        "session_id": "sess-1",
+        "task_id": "task-1",
+    }
+
+
+def _share_confidential():
+    return {
+        "agent_id": "agent-assistant",
+        "tool": "google_drive",
+        "action": "share_file",
+        "resource_id": "Confidential_Audit_Report.pdf",
+        "parameters": {"recipient": "audit@external.example", "role": "reader"},
+        "session_id": "sess-1",
+        "task_id": "task-1",
+    }
+
+
+def test_action_record_validates_real_review_action(api_ctx):
+    api_ctx.pipeline.handle(_read_vendor(), _KEY_ASSISTANT)
+    decision = api_ctx.pipeline.handle(_share_confidential(), _KEY_ASSISTANT)
+    assert decision.verdict == "REVIEW"
+
+    stored = api_ctx.store.get_action(decision.action_id)
+    record = ActionRecord.model_validate(stored)
+    assert record.action_id == decision.action_id
+    assert record.agent_id == "agent-assistant"
+    assert record.taint_sources == ["vendor_notes.txt"]
+    assert record.request is not None
+    assert record.approval_id == decision.approval_id
+
+
+def test_approval_view_validates_real_pending_approval(api_ctx):
+    api_ctx.pipeline.handle(_read_vendor(), _KEY_ASSISTANT)
+    api_ctx.pipeline.handle(_share_confidential(), _KEY_ASSISTANT)
+
+    pending = api_ctx.service.list("pending")
+    assert len(pending) == 1
+    view = ApprovalView.model_validate(pending[0])
+    assert view.status.value == "pending"
+    assert view.tool == "google_drive"
+    assert view.resource_id == "Confidential_Audit_Report.pdf"
+    assert view.parameters == {
+        "recipient": "audit@external.example",
+        "role": "reader",
+    }
+    assert view.taint_sources == ["vendor_notes.txt"]
