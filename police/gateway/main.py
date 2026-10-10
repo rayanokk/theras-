@@ -24,6 +24,7 @@ from police.gateway.pipeline import Pipeline
 from police.identity import IdentityRegistry
 from police.policy.engine import load_policy
 from police.policy.taint import TaintTracker
+from police.risk.scorer import make_scorer
 from police.store.sqlite_store import SQLiteStore
 
 load_dotenv()
@@ -38,6 +39,10 @@ vault = EvidenceVault(store)
 taint = TaintTracker(store)
 connectors = {"google_drive": drive, "mail": mail}
 
+risk_scorer = make_scorer(
+    use_llm=os.getenv("RISK_LLM_ENABLED", "false").lower() == "true"
+)
+
 pipeline = Pipeline(
     policy=policy,
     identities=identities,
@@ -45,7 +50,7 @@ pipeline = Pipeline(
     store=store,
     vault=vault,
     taint=taint,
-    risk_scorer=None,
+    risk_scorer=risk_scorer,
 )
 
 approvals = ApprovalService(store, vault, pipeline, identities)
