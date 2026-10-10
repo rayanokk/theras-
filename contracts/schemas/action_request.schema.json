@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "Action": {
+      "enum": [
+        "read_file",
+        "list_files",
+        "share_file",
+        "delete_file",
+        "send_email"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "Tool": {
+      "enum": [
+        "google_drive",
+        "mail"
+      ],
+      "title": "Tool",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "agent_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent Id"
+    },
+    "user_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "User Id"
+    },
+    "tool": {
+      "$ref": "#/$defs/Tool"
+    },
+    "action": {
+      "$ref": "#/$defs/Action"
+    },
+    "resource_id": {
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9_.-]+$",
+      "title": "Resource Id",
+      "type": "string"
+    },
+    "parameters": {
+      "additionalProperties": true,
+      "title": "Parameters",
+      "type": "object"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    },
+    "task_id": {
+      "title": "Task Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tool",
+    "action",
+    "resource_id",
+    "parameters",
+    "session_id",
+    "task_id"
+  ],
+  "title": "ActionRequest",
+  "type": "object"
+}
