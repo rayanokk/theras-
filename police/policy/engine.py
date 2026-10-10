@@ -6,7 +6,7 @@ policies.yaml :
 
     1. stage: deny    -> une regle vraie suffit : DENY
     2. stage: review  -> une regle vraie suffit : REVIEW
-    3. stage: allow   -> une regle vraie suffit : ALLOW ; aucune : DEFAULT-DENY
+    3. stage: allow   -> une regle vraie suffit : ALLOW ; aucune : R-DENY-DEFAULT
     4. stage: harden  -> seulement si le verdict n'est pas DENY ; un ALLOW devient
                          REVIEW, un REVIEW reste REVIEW avec la raison ajoutee.
 
@@ -31,7 +31,10 @@ import yaml
 VERDICT_DENY = "DENY"
 VERDICT_REVIEW = "REVIEW"
 VERDICT_ALLOW = "ALLOW"
-DEFAULT_DENY_ID = "DEFAULT-DENY"
+DEFAULT_DENY_ID = "R-DENY-DEFAULT"
+DEFAULT_DENY_REASON = (
+    "Aucune règle n'autorise explicitement cette action (refus par défaut)"
+)
 
 
 @dataclass
@@ -114,7 +117,7 @@ def evaluate(
     if deny_ids:
         return VERDICT_DENY, deny_ids, deny_reasons
 
-    # 2. REVIEW, puis 3. ALLOW ; aucune ALLOW -> DEFAULT-DENY.
+    # 2. REVIEW, puis 3. ALLOW ; aucune ALLOW -> R-DENY-DEFAULT.
     review_ids, review_reasons = _matching(policy, "review", facts)
     allow_ids, allow_reasons = _matching(policy, "allow", facts)
 
@@ -127,7 +130,9 @@ def evaluate(
         rule_ids = list(allow_ids)
         reasons = list(allow_reasons)
     else:
-        return VERDICT_DENY, [DEFAULT_DENY_ID], ["Aucune règle n'autorise cette action"]
+        # Refus par defaut : aucune regle ne s'applique. Les durcisseurs
+        # (etape 4) ne jouent jamais sur ce DENY.
+        return VERDICT_DENY, [DEFAULT_DENY_ID], [DEFAULT_DENY_REASON]
 
     # 4. HARDEN : uniquement si le verdict n'est pas DENY. Un ALLOW devient REVIEW ;
     #    un REVIEW reste REVIEW. Dans tous les cas la regle vraie est ajoutee.

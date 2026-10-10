@@ -130,10 +130,12 @@ class Pipeline:
             declared = request.agent_id if request is not None else None
             identity_ok = declared is None or declared == identity["id"]
 
+        # Explicabilite : un fait non verifie est ABSENT du dict (ni False ni
+        # None), pour que le moteur ne declenche pas une regle DENY a cote. Ainsi
+        # action_allowed n'est pose que si l'identite est bonne, et resource_ok
+        # seulement si l'identite ET le droit le sont.
         facts: dict[str, Any] = {
             "identity_ok": identity_ok,
-            "resource_ok": False,
-            "action_allowed": False,
             "has_recipient": False,
             "recipient_internal": False,
             "recipient_partner": False,
@@ -153,14 +155,18 @@ class Pipeline:
         facts["action"] = action
         facts["sensitive"] = action in SENSITIVE_ACTIONS
 
+        # action_allowed n'est pose que si l'identite est verifiee.
         if identity_ok and identity is not None:
             allowed = identity.get("allowed", {}) or {}
             facts["action_allowed"] = action in allowed.get(tool, [])
 
-        # describe + faits de ressource seulement si identite et droit OK.
-        if facts["identity_ok"] and facts["action_allowed"]:
+        # describe + resource_ok seulement si identite ET droit sont verifies.
+        if facts.get("identity_ok") and facts.get("action_allowed"):
             connector = self._connectors.get(tool)
-            if connector is not None:
+            if connector is None:
+                # Connecteur introuvable : fail closed.
+                facts["resource_ok"] = False
+            else:
                 try:
                     resource_info = connector.describe(
                         action, request.resource_id, request.parameters
@@ -231,7 +237,7 @@ class Pipeline:
 
         Renvoie (ok, rule_ids, reasons). ok=False si les parametres ont change
         depuis la demande, ou si l'etat actuel donne un verdict DENY (y compris
-        DEFAULT-DENY). Le scoreur de risque n'est jamais appele.
+        le refus par defaut R-DENY-DEFAULT). Le scoreur de risque n'est jamais appele.
         """
         approval_hash = (
             approval.params_hash
