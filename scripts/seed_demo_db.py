@@ -62,6 +62,8 @@ def _action(
     rule_ids,
     reasons,
     created_at,
+    approval_id=None,
+    result=None,
 ) -> dict:
     """Construit un dict action conforme au contrat."""
     return {
@@ -78,6 +80,9 @@ def _action(
         "status": status,
         "rule_ids": rule_ids,
         "reasons": reasons,
+        "policy_version": POLICY_VERSION,
+        "approval_id": approval_id,
+        "result": result,
         "created_at": created_at,
     }
 
@@ -101,6 +106,7 @@ def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
         "google_drive", "read_file", "Team_Roadmap.md", {},
         "ALLOW", "EXECUTED", ["R-ALLOW-01"],
         ["read_file autorisé : agent dans l'ACL."], ts,
+        result={"content": "<contenu de Team_Roadmap.md>", "trusted": True},
     )
     store.put_action(a1)
     vault.record("REQUESTED", "PA-0001", {"request": "read_file Team_Roadmap.md"}, POLICY_VERSION)
@@ -114,6 +120,7 @@ def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
         "google_drive", "read_file", "vendor_notes.txt", {},
         "ALLOW", "EXECUTED", ["R-ALLOW-01"],
         ["read_file autorisé ; ressource non fiable, session marquée tainted."], ts,
+        result={"content": "<contenu de vendor_notes.txt>", "trusted": False},
     )
     store.put_action(a2)
     store.set_session(
@@ -136,6 +143,7 @@ def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
             "Fichier confidentiel partagé à l'extérieur.",
             "Session tainted et action sensible.",
         ], ts,
+        approval_id="AP-0001",
     )
     store.put_action(a3)
     approval = {
@@ -176,6 +184,7 @@ def seed(store: SQLiteStore, ttl_minutes: int = DEFAULT_TTL_MINUTES) -> None:
         "google_drive", "delete_file", "Team_Roadmap.md", {},
         "REVIEW", "EXECUTED", ["R-REV-03"],
         ["Toute suppression de fichier passe en REVIEW."], ts,
+        approval_id="AP-0002", result={"deleted": True},
     )
     store.put_action(a5)
     approved = {
