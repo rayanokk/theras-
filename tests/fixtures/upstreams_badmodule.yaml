@@ -1,0 +1,7 @@
+# Config de TEST pointant un module inexistant : le sous-processus ne demarre
+# pas, le serveur ne doit PAS etre enregistre (fail closed), le Gateway demarre
+# quand meme.
+upstreams:
+  fake:
+    module: tests.fixtures.does_not_exist_xyz
+    env: []
