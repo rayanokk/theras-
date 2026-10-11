@@ -16,6 +16,7 @@ Usage (depuis la racine du repo) :
     RISK_LLM_ENABLED=false python -m bench.run_bench            # mode no-llm
     RISK_LLM_ENABLED=true  python -m bench.run_bench --mode llm
     python -m bench.run_bench --only S-FAL-01
+    python -m bench.run_bench --dataset datagen/cache/dataset.json --mode no-llm
 """
 from __future__ import annotations
 
@@ -265,12 +266,22 @@ def play(sc, use_llm):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--mode", choices=["no-llm", "llm"], default=None)
+    p.add_argument("--dataset", type=str, help="Chemin vers un dataset.json généré (Forge)")
     p.add_argument("--only")
     args = p.parse_args()
     use_llm = (args.mode == "llm") or (args.mode is None and os.getenv("RISK_LLM_ENABLED", "false").lower() == "true")
     mode = "llm" if use_llm else "no-llm"
 
-    scenarios = yaml.safe_load(SCENARIOS.read_text(encoding="utf-8"))
+    # Charger les scénarios (YAML manuel ou JSON Forge)
+    if args.dataset:
+        dataset_path = Path(args.dataset)
+        data = json.loads(dataset_path.read_text(encoding="utf-8"))
+        scenarios = data["scenarios"]
+        print(f"📂 Dataset Forge : {args.dataset} ({len(scenarios)} scénarios)")
+    else:
+        scenarios = yaml.safe_load(SCENARIOS.read_text(encoding="utf-8"))
+        print(f"📂 Scénarios manuels : {SCENARIOS} ({len(scenarios)} scénarios)")
+    
     if args.only:
         scenarios = [s for s in scenarios if s["id"] == args.only]
 

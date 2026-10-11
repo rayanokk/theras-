@@ -98,14 +98,23 @@ class Oracle:
 
     # ------------------------------------------------------------------- verdict
     def verdict(self, *, agent, action, resource_id="none", recipient_domain=None,
-                session_tainted=False, agent_tainted=False, params_valid=True,
-                identity_ok=True) -> tuple[str, list[str]]:
-        facts = self._facts(agent=agent, action=action, resource_id=resource_id,
-                            recipient_domain=recipient_domain, session_tainted=session_tainted,
-                            agent_tainted=agent_tainted, params_valid=params_valid,
-                            identity_ok=identity_ok)
+            session_tainted=False, agent_tainted=False, params_valid=True,
+            identity_ok=True) -> tuple[str, list[str], list[str]]:
+        """Calcule le verdict. Renvoie (verdict, rule_ids, regles_no_llm)."""
+        facts = self._facts(
+            agent=agent, action=action, resource_id=resource_id,
+            recipient_domain=recipient_domain, session_tainted=session_tainted,
+            agent_tainted=agent_tainted, params_valid=params_valid,
+            identity_ok=identity_ok
+        )
         verdict, rule_ids, _reasons = evaluate(facts, self.policy)
-        return verdict, rule_ids
+        
+        # R-REV-04 est un durcissement heuristique (stage: harden dans policies.yaml)
+        # On le sépare dans regles_no_llm pour le benchmark --mode no-llm
+        regles_base = [r for r in rule_ids if r != "R-REV-04"]
+        regles_no_llm = ["R-REV-04"] if "R-REV-04" in rule_ids else []
+        
+        return verdict, regles_base, regles_no_llm
 
 
 def domain_of(email_or_domain: str | None) -> str | None:

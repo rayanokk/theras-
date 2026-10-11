@@ -24,7 +24,7 @@ def cmd_build(args):
     CACHE_DIR.mkdir(exist_ok=True)
     DOCUMENTS_DIR.mkdir(exist_ok=True)
     
-    scenarios, documents, stats = generate(count=args.count, seed=args.seed, use_risk=args.use_risk)
+    scenarios, documents, stats = generate(count=args.count, seed=args.seed, use_risk=True)
     
     # Écrire les documents générés
     for resource_id, doc_data in documents.items():
@@ -55,7 +55,7 @@ def cmd_verify(args):
         data = json.load(f)
     
     scenarios = data["scenarios"]
-    oracle = Oracle(use_risk=False)  # sans risk pour la vérif (règles déterministes)
+    oracle = Oracle(use_risk=True)  # sans risk pour la vérif (règles déterministes)
     
     divergences = []
     for sc in scenarios:
@@ -72,22 +72,26 @@ def cmd_verify(args):
             
             verdict_attendu = step["attendu"]
             regles_attendues = set(step.get("regles", []))
+            regles_no_llm_attendues = set(step.get("regles_no_llm", []))
             
-            verdict_oracle, regles_oracle = oracle.verdict(
+            verdict_oracle, regles_oracle, regles_no_llm_oracle = oracle.verdict(
                 agent=agent, action=action, resource_id=resource_id,
                 recipient_domain=domain,
                 session_tainted=session_tainted, agent_tainted=agent_tainted
             )
             
-            regles_oracle_set = set(r for r in regles_oracle if r != "R-REV-04")
+            regles_oracle_set = set(regles_oracle)
+            regles_no_llm_oracle_set = set(regles_no_llm_oracle)
             
-            if verdict_oracle != verdict_attendu or regles_oracle_set != regles_attendues:
+            if (verdict_oracle != verdict_attendu or 
+                regles_oracle_set != regles_attendues or
+                regles_no_llm_oracle_set != regles_no_llm_attendues):
                 divergences.append({
                     "scenario": sc["id"],
                     "step": i,
                     "action": action,
-                    "attendu": (verdict_attendu, sorted(regles_attendues)),
-                    "oracle": (verdict_oracle, sorted(regles_oracle_set))
+                    "attendu": (verdict_attendu, sorted(regles_attendues), sorted(regles_no_llm_attendues)),
+                    "oracle": (verdict_oracle, sorted(regles_oracle_set), sorted(regles_no_llm_oracle_set))
                 })
             
             # Taint après lecture doc non fiable
