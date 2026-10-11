@@ -18,29 +18,36 @@ DATASET_FILE = CACHE_DIR / "dataset.json"
 
 
 def cmd_build(args):
-    """Génère N scénarios et les écrit dans le cache."""
+    """Génère N scénarios et les écrit dans le cache (ou le chemin --out)."""
     print(f"🔨 Génération de {args.count} scénarios (seed={args.seed})...")
-    
-    CACHE_DIR.mkdir(exist_ok=True)
-    DOCUMENTS_DIR.mkdir(exist_ok=True)
-    
+
+    # --no-llm : forcer le fallback sans Bedrock (masque le modèle le temps du build).
+    if getattr(args, "no_llm", False):
+        os.environ.pop("BEDROCK_MODEL_ID_AGENT", None)
+        print("   (mode sans LLM : fallback déterministe)")
+
+    # --out : fichier dataset de sortie ; les documents vont dans <dossier de --out>/documents/.
+    dataset_file = Path(args.out) if getattr(args, "out", None) else DATASET_FILE
+    documents_dir = dataset_file.parent / "documents"
+    dataset_file.parent.mkdir(parents=True, exist_ok=True)
+    documents_dir.mkdir(exist_ok=True)
+
     scenarios, documents, stats = generate(count=args.count, seed=args.seed)
     
     # Écrire les documents générés
     for resource_id, doc_data in documents.items():
-        doc_path = DOCUMENTS_DIR / f"{resource_id}"
-        with open(doc_path, "w", encoding="utf-8") as f:
+        with open(documents_dir / f"{resource_id}", "w", encoding="utf-8") as f:
             f.write(doc_data["body"])
         print(f"  📄 {resource_id}")
-    
-    # Écrire dataset.json
+
+    # Écrire le dataset
     dataset = {"scenarios": scenarios, "stats": stats}
-    with open(DATASET_FILE, "w", encoding="utf-8") as f:
+    with open(dataset_file, "w", encoding="utf-8") as f:
         json.dump(dataset, f, indent=2, ensure_ascii=False)
-    
+
     print(f"\n✅ Généré : {len(scenarios)} scénarios")
     print(f"   📊 Stats : {stats['llm']} LLM, {stats['fallback']} fallback")
-    print(f"   📁 Cache : {DATASET_FILE}")
+    print(f"   📁 Dataset : {dataset_file}")
 
 
 def cmd_verify(args):
@@ -146,7 +153,8 @@ def main():
     p_build = subparsers.add_parser("build", help="Génère N scénarios")
     p_build.add_argument("--count", type=int, default=20, help="Nombre de scénarios (défaut: 20)")
     p_build.add_argument("--seed", type=int, default=0, help="Seed aléatoire (défaut: 0)")
-    p_build.add_argument("--use-risk", action="store_true", help="Calcule le score de risque (lent)")
+    p_build.add_argument("--out", help="Fichier dataset de sortie (défaut: datagen/cache/dataset.json)")
+    p_build.add_argument("--no-llm", action="store_true", help="Forcer le fallback sans Bedrock")
     
     # verify
     subparsers.add_parser("verify", help="Vérifie la cohérence oracle du cache")
@@ -158,7 +166,8 @@ def main():
     p_regen = subparsers.add_parser("regen", help="Régénère le cache (alias de build)")
     p_regen.add_argument("--count", type=int, default=20)
     p_regen.add_argument("--seed", type=int, default=0)
-    p_regen.add_argument("--use-risk", action="store_true")
+    p_regen.add_argument("--out", help="Fichier dataset de sortie")
+    p_regen.add_argument("--no-llm", action="store_true")
     
     args = parser.parse_args()
     
