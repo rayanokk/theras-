@@ -137,15 +137,18 @@ def play(sc, use_llm):
             prob = []
             if exp_v and got_v != exp_v:
                 prob.append(f"verdict {got_v}≠{exp_v}")
-            missing = [x for x in exp_rules if x not in got_rules]
-            if missing:
-                prob.append(f"règles manquantes {missing} (obtenu {got_rules})")
+            # R-REV-04 = durcissement ajouté par le scoreur LLM : compté à part, hors égalité
+            llm_hard = "R-REV-04" in got_rules
+            got_cmp = [r for r in got_rules if r != "R-REV-04"] if use_llm else got_rules
+            if sorted(got_cmp) != sorted(exp_rules):
+                prob.append(f"règles {sorted(got_cmp)}≠{sorted(exp_rules)}")
             if "attendu_http" in step and r.status_code != step["attendu_http"]:
                 prob.append(f"HTTP {r.status_code}≠{step['attendu_http']}")
             ok_all &= not prob
             steps_out.append({"step": i, "action": req["action"], "resource": req["resource_id"],
                               "attendu": exp_v, "obtenu": got_v,
                               "regles_attendues": exp_rules, "regles_obtenues": got_rules,
+                              "llm_hardening": bool(use_llm and "R-REV-04" in got_rules),
                               "http": r.status_code, "latency_ms": ms,
                               "ok": not prob, "note": "; ".join(prob)})
 
@@ -185,8 +188,9 @@ def play(sc, use_llm):
             act = client.get(f"/v1/actions/{last_action_id}",
                              headers={"X-API-Key": APPROVER_KEYS['approver-alice']}).json()
             got_status = act.get("status")
+            # critère principal d'un decide : le STATUT final de l'action (pas le code HTTP)
             if "attendu_statut" in step and got_status != step["attendu_statut"]:
-                prob.append(f"statut {got_status}≠{step['attendu_statut']}")
+                prob.append(f"action_status {got_status}≠{step['attendu_statut']}")
             # événement attendu dans le Vault (BLOCKED / EXECUTED / EXPIRED)
             if "evenement" in step:
                 evs = client.get(f"/v1/evidence?action_id={last_action_id}",
@@ -247,6 +251,7 @@ def main():
 
     # métriques : une action « malveillante » = première étape dont l'attendu n'est pas ALLOW
     malicious = blocked = legit = fp = esc = 0
+    llm_hard_total = 0
     for sc, res in zip(scenarios, results):
         first = sc["steps"][0]
         exp = first.get("attendu")
@@ -261,6 +266,7 @@ def main():
                 if res["result"] == "OK":
                     blocked += 1
         esc += sum(1 for s in res["steps"] if s.get("obtenu") == "REVIEW")
+        llm_hard_total += sum(1 for s in res["steps"] if s.get("llm_hardening"))
 
     lat_sorted = sorted(all_lat)
     def pct(q): return lat_sorted[min(int(len(lat_sorted) * q), len(lat_sorted) - 1)] if lat_sorted else 0
@@ -270,6 +276,7 @@ def main():
         "legit_total": legit, "false_positives": fp,
         "false_positive_rate": round(fp / legit, 3) if legit else None,
         "human_escalations": esc,
+        "llm_hardenings": llm_hard_total,
         "latency_ms": {"p50": pct(0.5), "p95": pct(0.95), "max": lat_sorted[-1] if lat_sorted else 0},
         "evidence_chain_valid": chain_ok, "evidence_broken_at": None,
     }

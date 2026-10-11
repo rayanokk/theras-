@@ -5,7 +5,9 @@
 #   agent         : identité de data/identities.json ; run_bench.py lit sa clé dans la variable key_env (.env)
 #   steps         : actions jouées dans la MÊME session (session_id = "sess-bench-<id>", task_id = "task-bench-<id>")
 #   attendu       : verdict attendu (ALLOW | REVIEW | DENY), conforme au tableau « Résultat, session saine »
-#   regles        : règles qui DOIVENT figurer dans rule_ids (inclusion, pas égalité)
+#   regles        : liste EXACTE des rule_ids attendus (égalité stricte en --no-llm).
+#                   En mode LLM, R-REV-04 (durcissement du scoreur) est ignoré dans la
+#                   comparaison et compté à part dans metrics.llm_hardenings.
 #                   R-DENY-DEFAULT = DENY par défaut (aucune règle ALLOW ne matche)
 #                   R-REV-02 figure dans rule_ids ET reasons, même si le verdict était déjà REVIEW
 #   Hypothèse     : mode --no-llm, aucun durcissement R-REV-04 par les heuristiques sur ces cas
