@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 import yaml
@@ -55,7 +56,7 @@ def cmd_verify(args):
     dataset_file = Path(args.dataset) if getattr(args, "dataset", None) else DATASET_FILE
     if not dataset_file.exists():
         print(f"❌ {dataset_file} introuvable. Lance `build` d'abord.")
-        return
+        sys.exit(1)
 
     print(f"🔍 Vérification de la cohérence oracle : {dataset_file}")
 
@@ -115,9 +116,9 @@ def cmd_verify(args):
             print(f"  {d['scenario']} step {d['step']} ({d['action']})")
             print(f"    Attendu : {d['attendu']}")
             print(f"    Oracle  : {d['oracle']}")
-        print("\n❌ Le cache n'est plus cohérent avec l'oracle.")
-    else:
-        print(f"\n✅ {len(scenarios)} scénarios vérifiés : 100% cohérents avec l'oracle.")
+        print("\n❌ Le dataset n'est plus cohérent avec l'oracle.")
+        sys.exit(1)   # code non nul : le bouton de D arrête la chaîne
+    print(f"\n✅ {len(scenarios)} scénarios vérifiés : 100% cohérents avec l'oracle.")
 
 
 def cmd_stats(args):
