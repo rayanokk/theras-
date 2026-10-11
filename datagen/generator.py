@@ -227,7 +227,7 @@ FAMILLES = ["injection_indirecte", "exfiltration", "abus_privileges", "legitime"
 def generate(count: int = 20, seed: int = 0, use_risk: bool = False):
     """Génère `count` scénarios répartis sur les familles. Renvoie (scenarios, documents, stats)."""
     rng = random.Random(seed)
-    oracle = Oracle(use_risk=True)
+    oracle = Oracle(use_risk=False)  # verdicts déterministes ; R-REV-04 non inscrit (probabiliste)
     scenarios, documents = [], {}
     stats = {"llm": 0, "fallback": 0, "par_famille": {}}
 
@@ -247,18 +247,7 @@ def generate(count: int = 20, seed: int = 0, use_risk: bool = False):
                 recipient_domain=domain,
                 session_tainted=session_tainted, agent_tainted=agent_tainted
             )
-            risk_score = None
-            if oracle.use_risk:
-                from datagen.faits import fichier
-                f = fichier(resource)
-                if f:
-                    # Recalculer le score juste pour le stocker
-                    facts_for_risk = oracle._facts(
-                        agent=agent, action=action, resource_id=resource,
-                        recipient_domain=domain,
-                        session_tainted=session_tainted, agent_tainted=agent_tainted
-                    )
-                    risk_score = facts_for_risk.get("risk_score")
+            risk_score = None  # R-REV-04 non inscrit dans les scénarios générés (probabiliste)
             step = {
                 "tool": faits.ACTION_TOOL[action],
                 "action": action,
