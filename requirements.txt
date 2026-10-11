@@ -7,5 +7,5 @@ boto3
 streamlit
 httpx
 pytest
-mcp
+mcp>=1.25,<2
 rich
