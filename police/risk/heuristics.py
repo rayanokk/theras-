@@ -44,7 +44,7 @@ def _domain_lists() -> dict:
 def score_action(request: ActionRequest, resource: ResourceInfo,
                  session_tainted: bool) -> RiskSignal:
     t0 = time.perf_counter()
-    action = request.action.value
+    action = request.action
     signals: list[str] = []
     score = 0.0
 

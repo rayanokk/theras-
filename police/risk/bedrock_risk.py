@@ -69,8 +69,8 @@ class BedrockRiskClient:
             raise LLMRiskError("modèle de risque non configuré")
 
         facts = {
-            "action": request.action.value,
-            "tool": request.tool.value,
+            "action": request.action,
+            "tool": request.tool,
             "resource_id": request.resource_id,
             "classification": resource.classification.value,
             "resource_trusted": resource.trusted,

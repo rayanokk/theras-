@@ -1,0 +1,54 @@
+# Manifeste du serveur MCP amont "demo_drive" : nos mocks Drive + Mail exposes
+# comme un serveur MCP tiers. Le Gateway Theras applique sa politique a partir de
+# ce seul fichier, sans code specifique.
+#
+# Source des ressources : data/drive_seed.json. On ne liste QUE les fichiers dont
+# la classification n'est pas "internal" OU dont trusted vaut false ; les fichiers
+# internal + trusted retombent sur default_classification (internal) et trusted=True.
+
+server: demo_drive
+default_classification: internal
+acl: [agent-assistant, agent-ops, agent-research]
+
+tools:
+  read_file:
+    effect: read
+    resource_from: path
+    # Pas d'untrusted_output : la confiance d'un read reflete le fichier lu
+    # (regle resources / seed). C'est trusted=false sur un fichier precis qui
+    # declenche le taint, pas la lecture en soi.
+  list_files:
+    effect: list
+    resource_from: path
+  share_file:
+    effect: share
+    resource_from: path
+    recipient_from: email
+  delete_file:
+    effect: delete
+    resource_from: path
+  send_email:
+    effect: send
+    resource_from: attachment
+    recipient_from: to
+
+resources:
+  # send_email sans piece jointe : resource_id conventionnel "none", classe none.
+  - {match: "none", classification: none}
+  # public
+  - {match: "Company_Brochure.pdf", classification: public}
+  - {match: "Press_Release_Q3.txt", classification: public}
+  - {match: "Product_Datasheet.pdf", classification: public}
+  - {match: "Public_Pricing.csv", classification: public}
+  # public ET non fiable
+  - {match: "uploaded_cv.txt", classification: public, trusted: false}
+  # internal mais non fiable (classification = defaut, trusted explicite)
+  - {match: "vendor_notes.txt", classification: internal, trusted: false}
+  - {match: "partner_invoice.pdf", classification: internal, trusted: false}
+  # confidential
+  - {match: "Confidential_Audit_Report.pdf", classification: confidential}
+  - {match: "Q3_Financials.xlsx", classification: confidential}
+  - {match: "Customer_List.csv", classification: confidential}
+  # restricted
+  - {match: "HR_Salaries.xlsx", classification: restricted}
+  - {match: "Security_Keys_Inventory.txt", classification: restricted}

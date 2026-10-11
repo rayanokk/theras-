@@ -151,6 +151,26 @@ def test_params_hash_changes_with_recipient():
     assert params_hash(a) != params_hash(b)
 
 
+def test_params_hash_native_request_is_frozen():
+    # Valeur figee : le passage de tool/action en str (support MCP) ne doit PAS
+    # changer le hash d'une requete native. Si ce test casse, la compatibilite
+    # des approbations deja emises est rompue.
+    req = ActionRequest.model_validate(
+        {
+            "tool": "google_drive",
+            "action": "share_file",
+            "resource_id": "Company_Brochure.pdf",
+            "parameters": {"recipient": "colleague@acme.example", "role": "reader"},
+            "session_id": "sess-1",
+            "task_id": "task-1",
+        }
+    )
+    assert (
+        params_hash(req)
+        == "c3eea050d1e9f7d2d707bcb471a9f7c5a705cc59843af25247ccd3169986f2e7"
+    )
+
+
 # --- Contrat 5 : ApprovalDecisionIn -------------------------------------------
 
 

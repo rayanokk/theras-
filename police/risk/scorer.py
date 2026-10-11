@@ -74,7 +74,7 @@ def _safe_heuristics(request, resource, session_tainted) -> RiskSignal:
     try:
         return heuristic_score(request, resource, session_tainted)
     except Exception as exc:
-        sensitive = request.action.value in SENSITIVE_ACTIONS
+        sensitive = request.action in SENSITIVE_ACTIONS
         return RiskSignal(
             score=1.0 if sensitive else 0.0,
             signals=[f"erreur du scoreur heuristique ({type(exc).__name__})"],
