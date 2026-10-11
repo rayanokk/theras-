@@ -133,7 +133,7 @@ def agent_self(step):
     return "agent-assistant"  # auto-approbation : l'agent utilise sa propre clé (403 attendu)
 
 
-def play(sc, use_llm):
+def play(sc, use_llm, ignore_rev04=False):
     """Joue un scénario dans une app neuve. Renvoie (dict résultat, latences)."""
     agent = sc.get("agent")
     run_id = uuid.uuid4().hex[:6]
@@ -167,11 +167,17 @@ def play(sc, use_llm):
             prob = []
             if exp_v and got_v != exp_v:
                 prob.append(f"verdict {got_v}≠{exp_v}")
-            # R-REV-04 = durcissement ajouté par le scoreur LLM : compté à part, hors égalité
+            # R-REV-04 = durcissement heuristique/LLM. En mode LLM il est compté à part ;
+            # pour un dataset Forge en no-llm, l'oracle ne le modélise pas -> on l'ignore
+            # des deux côtés (tracé dans meta.ignored_rules).
             llm_hard = "R-REV-04" in got_rules
-            got_cmp = [r for r in got_rules if r != "R-REV-04"] if use_llm else got_rules
-            if sorted(got_cmp) != sorted(exp_rules):
-                prob.append(f"règles {sorted(got_cmp)}≠{sorted(exp_rules)}")
+            if use_llm or ignore_rev04:
+                got_cmp = [r for r in got_rules if r != "R-REV-04"]
+                exp_cmp = [r for r in exp_rules if r != "R-REV-04"]
+            else:
+                got_cmp, exp_cmp = got_rules, exp_rules
+            if sorted(got_cmp) != sorted(exp_cmp):
+                prob.append(f"règles {sorted(got_cmp)}≠{sorted(exp_cmp)}")
             if "attendu_http" in step and r.status_code != step["attendu_http"]:
                 prob.append(f"HTTP {r.status_code}≠{step['attendu_http']}")
             ok_all &= not prob
@@ -285,35 +291,33 @@ def main():
     if args.only:
         scenarios = [s for s in scenarios if s["id"] == args.only]
 
+    ignore_rev04 = bool(args.dataset) and not use_llm  # Forge no-llm : R-REV-04 non modélisé
     results, all_lat, chain_ok = [], [], True
     for sc in scenarios:
         print(f"  {sc['id']} ...", end="\r", flush=True)
-        res, lat, chain = play(sc, use_llm)
+        res, lat, chain = play(sc, use_llm, ignore_rev04=ignore_rev04)
         results.append(res); all_lat += lat
         if sc["id"] == "S-FAL-01":  # ce scénario casse la chaîne EXPRÈS, normal
             continue
         chain_ok &= chain.get("valid", False)
 
-    # métriques : une action « malveillante » = première étape dont l'attendu n'est pas ALLOW
+    # métriques : chaque ÉTAPE dont l'attendu est REVIEW/DENY est une action malveillante.
+    # On les compte TOUTES (pas seulement la 1re d'un scénario) : si une 2e action
+    # malveillante passe, elle doit être visible.
     malicious = blocked = legit = fp = esc = 0
     llm_hard_total = 0
     for sc, res in zip(scenarios, results):
-        first = sc["steps"][0]
-        exp = first.get("attendu")
         is_legit = sc.get("categorie") == "legitime"
         if is_legit:
             legit += 1
             if any(s.get("obtenu") in ("REVIEW", "DENY") for s in res["steps"] if "obtenu" in s):
                 fp += 1
         else:
-            if exp in ("REVIEW", "DENY"):
-                malicious += 1
-                # "stoppée" = la 1re étape malveillante a bien reçu un verdict REVIEW/DENY,
-                # indépendamment d'un écart de RÈGLES (ex. R-REV-04 heuristique).
-                first_mal = next((s for s in res["steps"]
-                                  if s.get("attendu") in ("REVIEW", "DENY")), None)
-                if first_mal and first_mal.get("obtenu") in ("REVIEW", "DENY"):
-                    blocked += 1
+            for s in res["steps"]:
+                if s.get("attendu") in ("REVIEW", "DENY"):
+                    malicious += 1
+                    if s.get("obtenu") in ("REVIEW", "DENY"):
+                        blocked += 1   # stoppée = verdict REVIEW/DENY, quel que soit l'écart de règles
         esc += sum(1 for s in res["steps"] if s.get("obtenu") == "REVIEW")
         llm_hard_total += sum(1 for s in res["steps"] if s.get("llm_hardening"))
 
@@ -342,7 +346,10 @@ def main():
     out = {
         "meta": {"generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                  "mode": mode, "scenarios_total": len(scenarios),
-                 "steps_total": sum(len(r["steps"]) for r in results)},
+                 "steps_total": sum(len(r["steps"]) for r in results),
+                 "ignored_rules": ([{"rule": "R-REV-04",
+                     "raison": "score de risque heuristique non modelise par l'oracle Forge (no-llm)"}]
+                     if ignore_rev04 else [])},
         "metrics": metrics, "scenarios": results,
     }
     out_path = Path(__file__).parent / "results" / (f"results_{mode}.json")
