@@ -51,14 +51,15 @@ def cmd_build(args):
 
 
 def cmd_verify(args):
-    """Relit dataset.json et vérifie que l'oracle donne toujours les mêmes verdicts."""
-    if not DATASET_FILE.exists():
-        print(f"❌ {DATASET_FILE} introuvable. Lance `build` d'abord.")
+    """Relit un dataset.json (--dataset, défaut = cache) et vérifie l'oracle."""
+    dataset_file = Path(args.dataset) if getattr(args, "dataset", None) else DATASET_FILE
+    if not dataset_file.exists():
+        print(f"❌ {dataset_file} introuvable. Lance `build` d'abord.")
         return
-    
-    print("🔍 Vérification de la cohérence oracle...")
-    
-    with open(DATASET_FILE, encoding="utf-8") as f:
+
+    print(f"🔍 Vérification de la cohérence oracle : {dataset_file}")
+
+    with open(dataset_file, encoding="utf-8") as f:
         data = json.load(f)
     
     scenarios = data["scenarios"]
@@ -157,7 +158,8 @@ def main():
     p_build.add_argument("--no-llm", action="store_true", help="Forcer le fallback sans Bedrock")
     
     # verify
-    subparsers.add_parser("verify", help="Vérifie la cohérence oracle du cache")
+    p_verify = subparsers.add_parser("verify", help="Vérifie la cohérence oracle d'un dataset")
+    p_verify.add_argument("--dataset", help="Fichier dataset à vérifier (défaut: datagen/cache/dataset.json)")
     
     # stats
     subparsers.add_parser("stats", help="Affiche les stats du dataset")
