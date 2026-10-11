@@ -55,4 +55,49 @@ pipeline = Pipeline(
 
 approvals = ApprovalService(store, vault, pipeline, identities)
 
-app = create_app(pipeline, store, vault, identities, approvals)
+# Pare-feu MCP : OFF par defaut. Si THERAS_MCP_FIREWALL != "true", le Gateway se
+# comporte exactement comme avant (aucun manifeste charge, aucun sous-processus).
+_MCP_ENABLED = os.getenv("THERAS_MCP_FIREWALL", "false").lower() == "true"
+_lifespan = None
+
+if _MCP_ENABLED:
+    import logging
+    from contextlib import asynccontextmanager
+
+    from police.mcp_firewall.loader import start_mcp_connectors
+
+    _logger = logging.getLogger(__name__)
+    _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    _MANIFESTS = os.getenv(
+        "THERAS_MCP_MANIFESTS", "police/mcp_firewall/manifests"
+    )
+    _UPSTREAMS = os.getenv(
+        "THERAS_MCP_UPSTREAMS", "police/mcp_firewall/upstreams.yaml"
+    )
+
+    def _resolve(path: str) -> str:
+        # Chemin relatif -> resolu par rapport a la racine du repo, pas au cwd.
+        return path if os.path.isabs(path) else os.path.join(_REPO_ROOT, path)
+
+    @asynccontextmanager
+    async def _lifespan(app):  # noqa: F811
+        connectors, clients = start_mcp_connectors(
+            _resolve(_MANIFESTS), _resolve(_UPSTREAMS), _REPO_ROOT
+        )
+        for name, connector in connectors.items():
+            pipeline.register_connector(name, connector)
+        app.state.mcp_clients = clients
+        if not connectors:
+            _logger.warning(
+                "pare-feu MCP actif mais aucun serveur amont enregistré"
+            )
+        try:
+            yield
+        finally:
+            for client in clients:
+                try:
+                    client.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+app = create_app(pipeline, store, vault, identities, approvals, lifespan=_lifespan)

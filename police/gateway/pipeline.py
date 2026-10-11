@@ -64,6 +64,16 @@ class Pipeline:
         self._taint = taint
         self._risk_scorer = risk_scorer
 
+    def register_connector(self, name: str, connector: Connector) -> None:
+        """Ajoute un connecteur (serveur MCP amont). Jamais de remplacement.
+
+        Leve ValueError si `name` est deja present : on ne remplace jamais un
+        connecteur natif (google_drive, mail) ni un serveur deja enregistre.
+        """
+        if name in self._connectors:
+            raise ValueError(f"connecteur '{name}' deja enregistre")
+        self._connectors[name] = connector
+
     # ------------------------------------------------------------- action_id
 
     def _next_action_id(self) -> str:

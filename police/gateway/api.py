@@ -21,8 +21,8 @@ from police.approvals.service import ApprovalError
 _VERDICT_STATUS = {"ALLOW": 200, "REVIEW": 202, "DENY": 403}
 
 
-def create_app(pipeline, store, vault, identities, approvals) -> FastAPI:
-    app = FastAPI(title="Theras Gateway")
+def create_app(pipeline, store, vault, identities, approvals, lifespan=None) -> FastAPI:
+    app = FastAPI(title="Theras Gateway", lifespan=lifespan)
 
     def _identity_or_401(api_key: str | None) -> dict:
         identity = identities.resolve(api_key)
