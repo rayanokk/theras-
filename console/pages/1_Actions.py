@@ -6,7 +6,7 @@ from console import theme
 from console.client import get_client
 from console.labels import RULE_LABELS, action_label
 
-theme.setup("Actions — Police Agents", "📋")
+theme.setup("Actions — Theras", "📋")
 
 
 @st.cache_resource

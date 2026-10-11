@@ -13,7 +13,7 @@ from console import theme
 from console.client import DecideError, get_client
 from console.labels import INTERNAL_DOMAIN
 
-theme.setup("Approvals — Police Agents", "⚖️")
+theme.setup("Approvals — Theras", "⚖️")
 
 
 @st.cache_resource

@@ -28,7 +28,7 @@ from console.bench_view import (
     summarize,
 )
 
-theme.setup("Benchmark — Police Agents", "📈")
+theme.setup("Benchmark — Theras", "📈")
 
 ENV_BENCH_PATH = "BENCH_RESULTS_PATH"
 
@@ -104,11 +104,8 @@ if FORGE_LLM_ALLOWED:
         "Générer avec le LLM (Bedrock)", value=False, disabled=running
     )
 else:
+    # FORGE_LLM_ENABLED != true : mode sans LLM, sans rien afficher (ni texte ni case).
     use_llm = False
-    col_llm.caption(
-        "Mode sans LLM forcé : FORGE_LLM_ENABLED n’est pas « true », "
-        "la génération utilise le fallback déterministe de Forge."
-    )
 
 launch = st.button(
     "🔨 Nouveau benchmark",

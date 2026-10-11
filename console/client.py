@@ -1,4 +1,4 @@
-"""Client de la console Police Agents.
+"""Client de la console Theras.
 
 Deux implémentations derrière un même Protocol :
 - LocalClient : lit directement la base (SQLiteStore + EvidenceVault) et convertit

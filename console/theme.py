@@ -476,7 +476,7 @@ NAV_CSS = """
 <style>
 /* Nom du produit et sous-titre au-dessus du menu */
 [data-testid="stSidebarNav"]::before {
-  content: "🛡️ Police Agents";
+  content: "🛡️ Theras";
   display: block;
   font-size: 1.15rem;
   font-weight: 800;

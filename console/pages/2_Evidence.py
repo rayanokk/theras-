@@ -5,7 +5,7 @@ import streamlit as st
 from console import theme
 from console.client import get_client
 
-theme.setup("Evidence — Police Agents", "⛓️")
+theme.setup("Evidence — Theras", "⛓️")
 
 
 @st.cache_resource

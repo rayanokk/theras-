@@ -1,4 +1,4 @@
-"""Console Police Agents — page d'accueil (Streamlit).
+"""Console Theras — page d'accueil (Streamlit).
 
 Lancer : streamlit run console/app.py
 Mode choisi par CONSOLE_MODE (local par défaut, ou http) ; cf. console/client.py.
@@ -9,7 +9,7 @@ import streamlit as st
 from console import theme
 from console.client import get_client
 
-theme.setup("Police Agents — Console", "🛡️")
+theme.setup("Theras — Console", "🛡️")
 
 # Étapes du trajet d'une action : (numéro, titre, phrase, ton).
 _FLOW = [
@@ -39,7 +39,7 @@ def _flow_html() -> str:
 
 
 theme.hero(
-    "Police Agents",
+    "Theras",
     "Les agents IA proposent. Les règles décident. L’humain tranche.",
     "Chaque action d’un agent IA passe par un gateway : autorisée, bloquée, ou soumise "
     "à une validation humaine, avec une preuve vérifiable à chaque étape.",

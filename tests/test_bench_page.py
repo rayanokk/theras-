@@ -268,3 +268,33 @@ def test_ignored_rules_line_absent_when_missing(monkeypatch, tmp_path):
     data["meta"].pop("ignored_rules", None)
     html = _run(monkeypatch, tmp_path, data)
     assert "Règles ignorées dans la comparaison" not in html
+
+
+# --- Génération : affichage du mode LLM -----------------------------------
+
+def _run_app(monkeypatch, tmp_path, data=None):
+    path = tmp_path / "results.json"
+    path.write_text(json.dumps(data or _base()), encoding="utf-8")
+    monkeypatch.setenv("BENCH_RESULTS_PATH", str(path))
+    at = AppTest.from_file(PAGE, default_timeout=60)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    return at
+
+
+def test_no_llm_mode_shows_nothing_extra(monkeypatch, tmp_path):
+    # FORGE_LLM_ENABLED non défini : ni la case LLM, ni une phrase explicative.
+    monkeypatch.delenv("FORGE_LLM_ENABLED", raising=False)
+    at = _run_app(monkeypatch, tmp_path)
+    html = "\n".join(m.value for m in at.markdown)
+    assert "Mode sans LLM forcé" not in html
+    assert "fallback déterministe de Forge" not in html
+    labels = [c.label for c in at.checkbox]
+    assert "Générer avec le LLM (Bedrock)" not in labels
+
+
+def test_llm_enabled_shows_checkbox(monkeypatch, tmp_path):
+    monkeypatch.setenv("FORGE_LLM_ENABLED", "true")
+    at = _run_app(monkeypatch, tmp_path)
+    labels = [c.label for c in at.checkbox]
+    assert "Générer avec le LLM (Bedrock)" in labels
