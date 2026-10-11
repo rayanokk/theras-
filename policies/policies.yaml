@@ -20,7 +20,7 @@
 #   identity_ok, action_allowed, resource_ok, params_valid        (booléens)
 #   action, classification                                        (texte)
 #   has_recipient, recipient_internal, recipient_partner,
-#   recipient_blocked, sensitive, session_tainted,
+#   recipient_blocked, sensitive, session_tainted, agent_tainted,
 #   risk_unavailable                                              (booléens)
 #   risk_score                                                    (nombre, absent sans LLM)
 
@@ -29,6 +29,9 @@ policy_version: "2026-10-10.1"
 internal_domains: [acme.example]
 partner_domains: [partner.example]
 blocked_domains: [pastebin.example]
+
+# Duree de vie du taint lie a l'identite reelle de l'agent (minutes).
+agent_taint_ttl_minutes: 15
 
 rules:
 
@@ -135,9 +138,11 @@ rules:
   - id: R-REV-02
     stage: harden
     when:
-      session_tainted: true
       sensitive: true
-    reason: "Session contaminée par un document non fiable, action sensible"
+      any_of:
+        - {session_tainted: true}
+        - {agent_tainted: true}
+    reason: "Session ou agent contaminé par un document non fiable, action sensible"
 
   - id: R-REV-04
     stage: harden

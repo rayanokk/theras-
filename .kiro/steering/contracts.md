@@ -155,11 +155,35 @@ result          rempli si exécuté
 
 `POST /v1/actions` renvoie toujours une `Decision` : 200 (ALLOW, exécuté), 202 (REVIEW), 403 (DENY).
 
+`Decision` reste la réponse faite à l'agent. Les routes de lecture renvoient des vues enrichies
+(sous-classes tolérant un champ ajouté, `extra="ignore"`) :
+
+```
+ActionRecord = Decision + (renvoyé par GET /v1/actions et /v1/actions/{id})
+  agent_id          identité réelle (clé), ou null
+  declared_agent_id champ agent_id déclaré dans la requête, ou null
+  request           la requête validée (objet), ou null
+  session_id        texte ou null
+  created_at        ISO 8601 UTC ou null
+  taint_sources     liste de resource_id (union session + agent)
+
+ApprovalView = ApprovalRequest + (renvoyé par GET /v1/approvals et /v1/approvals/{id})
+  agent_id, user_id, tool, action, resource_id, reason, action_status   (texte ou null)
+  parameters        objet ou null
+  rule_ids, reasons, taint_sources                                       (listes)
+  risk              RiskSignal (objet) ou null
+```
+
 `RiskSignal` (scoreur de risque, A) :
 Interface du scoreur (A) : `score_action(request: ActionRequest, resource: ResourceInfo,
-session_tainted: bool) -> RiskSignal`. Score entre 0 et 1. En cas d'échec du LLM, renvoie
-les heuristiques avec `source = llm_unavailable`. Ne renvoie jamais de verdict. Appelé
+session_tainted: bool) -> RiskSignal`. Score entre 0 et 1. Ne renvoie jamais de verdict. Appelé
 uniquement si les règles n'ont pas déjà refusé l'action.
+
+Le scoreur est choisi **au démarrage** par `make_scorer(use_llm)`, piloté par la variable
+`RISK_LLM_ENABLED`. Sans LLM, seules les heuristiques sont utilisées. Avec LLM, le score final est
+`max(heuristiques, LLM)` : le LLM ne peut que **durcir**, jamais adoucir. En cas d'échec, de timeout, ou
+si `RISK_LLM_ENABLED=true` mais qu'aucun modèle n'est configuré, le scoreur renvoie
+`source = llm_unavailable` — ce qui, via R-REV-04, envoie toute action sensible en REVIEW (fail closed).
 
 ```
 score        0 à 1, ou null
@@ -228,7 +252,7 @@ Limite connue : la suppression des derniers événements n'est pas détectée sa
 ApprovalRequest
   approval_id, action_id, params_hash (copié au moment de la REVIEW)
   status          pending | approved | rejected | info_requested | expired
-  created_at, expires_at (= created_at + 10 min)
+  created_at, expires_at (= created_at + APPROVAL_TTL)
   approver_id, decision, justification, decided_at   (null tant que non décidé)
 
 ApprovalDecisionIn
@@ -236,9 +260,22 @@ ApprovalDecisionIn
   justification   10 caractères minimum
 ```
 
-Codes : 401 clé inconnue, 403 mauvais rôle, 409 déjà décidé, 410 expiré, 422 justification trop courte.
-Après `approve` : revalidation (approbation non expirée, `params_hash` identique, règles DENY rejouées sur
-l'état actuel). Un échec donne BLOCKED.
+`APPROVAL_TTL` : 10 minutes par défaut. La variable d'environnement `APPROVAL_TTL_SECONDS` peut la
+**raccourcir** (bornée à `[1, 600]` s ; une valeur absente, invalide, ≤ 0 ou > 600 retombe sur 600 s) —
+elle ne peut jamais l'allonger. Utile pour les tests et le banc.
+
+L'expiration est **calculée à la lecture** (`list`, `get`, `decide`) : si `now > expires_at` et le statut
+est encore ouvert (`pending` ou `info_requested`), l'approbation passe `expired`, l'action passe `EXPIRED`
+et un événement `EXPIRED` est écrit.
+
+Codes : 401 clé inconnue, 403 mauvais rôle, 404 approbation (ou action liée) introuvable, 409 déjà décidé,
+410 expiré, 422 justification trop courte.
+- `request_info` : l'approbation passe `info_requested` et l'action **reste en attente** (`PENDING_REVIEW`).
+- `reject` : `BLOCKED` puis action `DENIED`.
+- `approve` : revalidation (approbation non expirée, `params_hash` identique, contrôle complet rejoué sur
+  l'état actuel). Si la revalidation échoue (`PARAMS_CHANGED` ou verdict DENY), ou si une erreur interne
+  survient pendant l'exécution, l'action est `BLOCKED` puis `DENIED` (**fail closed**). Une REVIEW ne lève
+  jamais un DENY.
 
 ### Contrat 6 : interface `Store` (D)
 
@@ -247,6 +284,7 @@ put_action, get_action, list_actions(status)
 put_approval, get_approval, list_approvals(status)
 append_event, list_events(action_id)
 get_session, set_session        session = {"tainted": bool, "taint_sources": [resource_id]}
+                                taint d'agent (clé "agent:<id>") = idem + {"tainted_at": ISO 8601 UTC}
 ```
 
 ### Contrat 7 : hash canonique (`contracts/models.py`)
@@ -264,8 +302,17 @@ Une seule implémentation pour tout le projet. `reason`, `session_id` et `task_i
 
 **Actions sensibles** : `share_file`, `delete_file`, `send_email`.
 
-**Taint** : quand un `read_file` est exécuté sur une ressource `trusted = false`, la session devient
-`tainted` et le reste.
+**Taint** : quand un `read_file` est exécuté sur une ressource `trusted = false`, deux marquages sont posés.
+- Taint de **session** : repose sur le `session_id` déclaré par l'agent. La session devient `tainted` et le reste.
+- Taint d'**agent** : repose sur l'identité réelle (issue de la clé API, que l'agent ne peut pas changer),
+  stocké dans le Store sous la clé `"agent:<agent_id>"` avec un horodatage. Il a une durée de vie
+  `agent_taint_ttl_minutes` (15 par défaut, réglée dans `policies.yaml`) : un nouveau marquage repousse
+  l'horodatage. Il empêche de contourner le taint en changeant de `session_id` entre la lecture et l'action.
+
+**Faits de taint** : `session_tainted` (session contaminée) et `agent_tainted` (vrai si l'identité réelle a
+lu un document non fiable dans les `agent_taint_ttl_minutes` dernières minutes). Principe d'explicabilité :
+un fait non vérifié est **absent** du dictionnaire de faits (ni `false`, ni `null`), pour que le moteur ne
+cite jamais une règle à côté ; une condition sur un fait absent est fausse.
 
 **Faits calculés** à partir de `policies.yaml` : `recipient_internal`, `recipient_partner`,
 `recipient_blocked`. Pour un mail, la « classification » est celle de la pièce jointe (`none` sans pièce jointe).
@@ -274,7 +321,7 @@ Une seule implémentation pour tout le projet. `reason`, `session_id` et `task_i
 
 1. **Règles DENY** : une seule vraie suffit → DENY.
 2. **Règles REVIEW** : une seule vraie suffit → REVIEW.
-3. **Règles ALLOW** : une seule vraie suffit → ALLOW. Aucune → **DENY par défaut**.
+3. **Règles ALLOW** : une seule vraie suffit → ALLOW. Aucune → **DENY par défaut** (`R-DENY-DEFAULT`).
 4. **Durcisseurs**, uniquement si le verdict n'est pas DENY : un ALLOW devient REVIEW ; un REVIEW reste
    REVIEW mais la règle est ajoutée aux raisons. Un durcisseur ne transforme jamais un DENY en REVIEW.
 
@@ -297,8 +344,9 @@ Dans chaque étape, toutes les règles vraies sont listées dans `rule_ids`.
 | R-ALLOW-02 | 3 | Fichier `public` (ou mail sans pièce jointe) partagé ou envoyé au partenaire | ALLOW |
 | R-ALLOW-03 | 3 | Mail interne, pièce jointe `public`, `internal` ou aucune | ALLOW |
 | R-ALLOW-04 | 3 | Fichier `public` ou `internal` partagé en interne | ALLOW |
-| R-REV-02 | 4 | Session `tainted` et action sensible | durcit en REVIEW |
+| R-REV-02 | 4 | Action sensible, et session **ou** agent contaminé (`session_tainted` ou `agent_tainted`) | durcit en REVIEW |
 | R-REV-04 | 4 | Score de risque ≥ 0,7, ou LLM indisponible sur action sensible | durcit en REVIEW |
+| R-DENY-DEFAULT | 3 | Aucune règle n'autorise explicitement l'action (refus par défaut) | DENY |
 
 ### Résultat, session saine
 
@@ -311,17 +359,18 @@ Dans chaque étape, toutes les règles vraies sont listées dans `rule_ids`.
 | Vers un domaine bloqué | DENY | DENY | DENY | DENY |
 | Supprimer | REVIEW | REVIEW | REVIEW | REVIEW |
 
-En session `tainted`, chaque ALLOW sur une action sensible devient REVIEW ; le reste est inchangé.
-Hors des droits de l'agent ou de l'ACL, c'est toujours DENY.
+Si la session **ou** l'agent est contaminé, chaque ALLOW sur une action sensible devient REVIEW (R-REV-02) ;
+le reste est inchangé. Hors des droits de l'agent ou de l'ACL, c'est toujours DENY.
 
 ### Endpoints (header `X-API-Key`)
 
 | Méthode | Route | Qui |
 |---|---|---|
 | POST | `/v1/actions` | agent |
-| GET | `/v1/actions/{id}` | agent, console |
-| GET | `/v1/actions?status=` | console |
+| GET | `/v1/actions/{id}` | agent (ses propres actions seulement, sinon 404), approbateur |
+| GET | `/v1/actions?status=` | approbateur (clé d'agent → 403) |
 | GET | `/v1/approvals?status=pending` | approbateur |
+| GET | `/v1/approvals/{id}` | approbateur |
 | POST | `/v1/approvals/{id}/decide` | approbateur |
 | GET | `/v1/evidence?action_id=` | console |
 | GET | `/v1/evidence/verify` | console, jury |
