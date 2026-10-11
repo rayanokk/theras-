@@ -499,5 +499,6 @@ a[data-testid="stSidebarNavLink"]::after { font-size: 0.95rem; color: #E7ECF5; }
 [data-testid="stSidebarNavItems"] > :nth-child(2) a[data-testid="stSidebarNavLink"]::after { content: "📋  Journal des actions"; }
 [data-testid="stSidebarNavItems"] > :nth-child(3) a[data-testid="stSidebarNavLink"]::after { content: "🔒  Boîte noire · preuves"; }
 [data-testid="stSidebarNavItems"] > :nth-child(4) a[data-testid="stSidebarNavLink"]::after { content: "⚖️  Décisions en attente"; } > span:last-child::after { content: "⚖️  Décisions en attente"; }
+[data-testid="stSidebarNavItems"] > :nth-child(5) a[data-testid="stSidebarNavLink"]::after { content: "📈  Benchmark"; }
 </style>
 """
