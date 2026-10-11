@@ -113,6 +113,9 @@ class _Rig:
             http_client=self.client,
             wait_s=kwargs.pop("wait_s", 5),
             poll_s=kwargs.pop("poll_s", 0.05),
+            # Schémas : repli manifeste (pas de sous-processus amont supplémentaire ;
+            # la résolution des schémas réels est couverte par test_proxy.py).
+            schema_provider=kwargs.pop("schema_provider", lambda: {}),
             **kwargs,
         )
 
