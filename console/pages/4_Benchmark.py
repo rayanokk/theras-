@@ -156,22 +156,74 @@ chain_tone = "green" if chain_valid else "red"
 chain_value = "Oui" if chain_valid else "Non"
 chain_hint = "Vérifiée" if chain_valid else f"Rompue à la preuve {broken_at}"
 
-theme.kpis(
-    [
-        ("Scénarios réussis", f"{ok} / {scenarios_total}", scenarios_tone),
-        ("Taux de blocage", _pct(block_rate),
-         block_tone, f"{malicious_blocked if malicious_blocked is not None else '—'} / "
-                     f"{malicious_total if malicious_total is not None else '—'} malveillantes bloquées"),
-        ("Faux positifs",
-         f"{false_positives if false_positives is not None else '—'}",
-         fp_tone, f"sur {legit_total if legit_total is not None else '—'} légitimes"),
-        ("Escalades humaines",
-         f"{human_escalations if human_escalations is not None else '—'}", "cyan"),
-        ("Latence p50 / p95", f"{_ms(latency.get('p50'))} / {_ms(latency.get('p95'))}", "indigo",
-         f"max {_ms(latency.get('max'))}"),
-        ("Chaîne de preuves", chain_value, chain_tone, chain_hint),
-    ]
+# Clés de `metrics` déjà présentées explicitement (pour « Autres mesures »).
+KNOWN_METRIC_KEYS = {
+    "malicious_total", "malicious_blocked", "block_rate",
+    "legit_total", "false_positives", "false_positive_rate",
+    "human_escalations", "latency_ms",
+    "evidence_chain_valid", "evidence_broken_at",
+}
+
+# Durcissements LLM : on accepte plusieurs orthographes possibles côté bench.
+LLM_HARDENING_KEYS = ("llm_hardenings", "llm_hardening", "hardenings")
+llm_hardenings = None
+llm_hardening_key = None
+for key in LLM_HARDENING_KEYS:
+    if key in metrics:
+        llm_hardenings = metrics.get(key)
+        llm_hardening_key = key
+        break
+
+kpi_items = [
+    ("Scénarios réussis", f"{ok} / {scenarios_total}", scenarios_tone),
+    ("Taux de blocage", _pct(block_rate),
+     block_tone, f"{malicious_blocked if malicious_blocked is not None else '—'} / "
+                 f"{malicious_total if malicious_total is not None else '—'} malveillantes bloquées"),
+    ("Faux positifs",
+     f"{false_positives if false_positives is not None else '—'}",
+     fp_tone, f"sur {legit_total if legit_total is not None else '—'} légitimes"),
+    ("Escalades humaines",
+     f"{human_escalations if human_escalations is not None else '—'}", "cyan"),
+    ("Latence p50 / p95", f"{_ms(latency.get('p50'))} / {_ms(latency.get('p95'))}", "indigo",
+     f"max {_ms(latency.get('max'))}"),
+    ("Chaîne de preuves", chain_value, chain_tone, chain_hint),
+]
+if llm_hardenings is not None:
+    kpi_items.append(
+        ("Durcissements par l’IA", f"{llm_hardenings}", "violet",
+         "actions passées en validation humaine sur avis du scoreur de risque")
+    )
+theme.kpis(kpi_items)
+
+
+# --- Autres mesures (champs inconnus de metrics) ---------------------------
+def _format_metric(value) -> str:
+    """Rend une valeur de mesure de façon lisible, sans jamais planter."""
+    if isinstance(value, dict):
+        return ", ".join(f"{k} : {v}" for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value)
+    return str(value)
+
+
+extra_keys = sorted(
+    k for k in metrics
+    if k not in KNOWN_METRIC_KEYS and k != llm_hardening_key
 )
+if extra_keys:
+    theme.section("Autres mesures", "Champs supplémentaires présents dans le fichier de résultats.")
+    body = "".join(
+        "<tr>"
+        f'<td class="sd-mono sd-nw">{theme.esc(k)}</td>'
+        f"<td>{theme.esc(_format_metric(metrics.get(k)))}</td>"
+        "</tr>"
+        for k in extra_keys
+    )
+    theme.render(
+        '<div class="sd-table-wrap"><table class="sd-table">'
+        "<thead><tr><th>Mesure</th><th>Valeur</th></tr></thead>"
+        f"<tbody>{body}</tbody></table></div>"
+    )
 
 
 # --- Résultats par catégorie -----------------------------------------------
@@ -334,6 +386,10 @@ def _step_html(step: dict) -> str:
 
     if http is not None:
         rows.append(_kv("Code HTTP", theme.esc(http)))
+    # Pour une étape decide:*, le statut final de l'action (badge coloré).
+    action_status = step.get("action_status")
+    if str(action).startswith("decide:") and action_status:
+        rows.append(_kv("Statut de l’action", theme.status_badge(action_status)))
     if latency_ms is not None:
         rows.append(_kv("Latence", theme.esc(f"{latency_ms} ms")))
 
