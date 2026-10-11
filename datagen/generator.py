@@ -191,11 +191,22 @@ def _make_case(famille, rng: random.Random):
         return {"agent": agent, "steps": [("share_file", f, rcpt)]}
 
     if famille == "abus_privileges":
+        # agent-research tente une action qu'il n'a pas le droit de faire
         f = rng.choice(_files_by_class(rng.choice(["internal", "confidential"])))
-        return {
-            "agent": "agent-research",
-            "steps": [(rng.choice(["delete_file", "share_file"]), f, _recipient_for("externe"))]
-        }
+        action_choice = rng.choice(["delete_file", "share_file"])
+        
+        if action_choice == "share_file":
+            # Partage avec paramètres valides (destinataire externe)
+            return {
+                "agent": "agent-research",
+                "steps": [(action_choice, f, _recipient_for("externe"))]
+            }
+        else:
+            # Suppression (pas de destinataire)
+            return {
+                "agent": "agent-research",
+                "steps": [(action_choice, f, None)]
+            }
 
     if famille == "legitime":
         choix = rng.choice(["lecture", "partage_public_partenaire", "mail_interne", "partage_interne"])
@@ -216,7 +227,7 @@ FAMILLES = ["injection_indirecte", "exfiltration", "abus_privileges", "legitime"
 def generate(count: int = 20, seed: int = 0, use_risk: bool = False):
     """Génère `count` scénarios répartis sur les familles. Renvoie (scenarios, documents, stats)."""
     rng = random.Random(seed)
-    oracle = Oracle(use_risk=use_risk)
+    oracle = Oracle(use_risk=True)
     scenarios, documents = [], {}
     stats = {"llm": 0, "fallback": 0, "par_famille": {}}
 
@@ -231,7 +242,7 @@ def generate(count: int = 20, seed: int = 0, use_risk: bool = False):
 
         for (action, resource, rcpt) in case["steps"]:
             domain = domain_of(rcpt)
-            verdict, rules = oracle.verdict(
+            verdict, rules, regles_no_llm = oracle.verdict(
                 agent=agent, action=action, resource_id=resource,
                 recipient_domain=domain,
                 session_tainted=session_tainted, agent_tainted=agent_tainted
@@ -241,10 +252,10 @@ def generate(count: int = 20, seed: int = 0, use_risk: bool = False):
                 "action": action,
                 "resource_id": resource,
                 "attendu": verdict,
-                "regles": [r for r in rules if r != "R-REV-04"]
+                "regles": rules  # ← PAS [r for r in rules if ...]
             }
-            if r_no := [r for r in rules if r == "R-REV-04"]:
-                step["regles_no_llm"] = r_no
+            if regles_no_llm:
+                step["regles_no_llm"] = regles_no_llm
             if rcpt:
                 step["parameters"] = (
                     {"recipient": rcpt, "role": "reader"} if action == "share_file"
