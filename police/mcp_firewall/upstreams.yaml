@@ -1,0 +1,9 @@
+# Configuration de LANCEMENT des serveurs MCP amont (pas de la securite : celle-ci
+# vit dans les manifestes). Chaque entree indique le module Python a lancer en
+# sous-processus (python -m <module>) et les variables d'environnement a lui
+# transmettre. Un amont n'est branche que s'il a AUSSI un manifeste du meme nom.
+
+upstreams:
+  demo_drive:
+    module: police.mcp_firewall.upstreams.theras_mocks
+    env: []

@@ -1,0 +1,15 @@
+# Manifeste de TEST pour le serveur amont tests/fixtures/fake_upstream.py.
+# Declare read_file et slow, mais PAS boom : boom est donc un outil non declare
+# (il doit etre refuse en R-DENY-06 sans jamais atteindre l'amont).
+
+server: fake
+default_classification: internal
+acl: [agent-assistant]
+
+tools:
+  read_file:
+    effect: read
+    resource_from: path
+  slow:
+    effect: read
+    resource_from: seconds

@@ -1,0 +1,5 @@
+# Config de lancement de TEST : lance le faux serveur amont en sous-processus.
+upstreams:
+  fake:
+    module: tests.fixtures.fake_upstream
+    env: []
