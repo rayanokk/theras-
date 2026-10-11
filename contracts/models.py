@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # --- Enums (toutes heritent de str pour une serialisation JSON transparente) ---
@@ -97,6 +98,20 @@ RESOURCE_ID_PATTERN = r"^[a-zA-Z0-9_.-]+$"
 # Email simple, aligne sur contracts.md : local@domaine.tld, sans espace.
 EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
 
+# Outils natifs du Gateway (enum Tool) : valides exactement comme avant. Un outil
+# MCP (serveur amont declare par un manifeste) suit des contraintes de forme plus
+# larges ; son existence reelle est verifiee par le pipeline, pas ici.
+_NATIVE_TOOLS = {t.value for t in Tool}
+_NATIVE_ACTIONS = {a.value for a in Action}
+MCP_TOOL_PATTERN = r"^[a-z][a-z0-9_]{1,30}$"
+MCP_ACTION_PATTERN = r"^[A-Za-z0-9_.-]{1,64}$"
+MCP_RESOURCE_MAX_LEN = 512
+MCP_PARAMS_MAX_KEYS = 20
+MCP_PARAMS_MAX_JSON = 10_000
+_MCP_TOOL_RE = re.compile(MCP_TOOL_PATTERN)
+_MCP_ACTION_RE = re.compile(MCP_ACTION_PATTERN)
+_RESOURCE_ID_RE = re.compile(RESOURCE_ID_PATTERN)
+
 
 # --- Contrat 1 : parametres stricts par action --------------------------------
 
@@ -150,18 +165,64 @@ ACTION_TOOL: dict[str, str] = {
 # --- Contrat 1 : ActionRequest ------------------------------------------------
 
 
+def _has_control_char(value: str) -> bool:
+    return any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+
+
 class ActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent_id: str | None = None
     user_id: str | None = None
-    tool: Tool
-    action: Action
-    resource_id: str = Field(max_length=128, pattern=RESOURCE_ID_PATTERN)
+    # tool/action sont des str : les outils natifs portent une valeur de l'enum
+    # Tool/Action, un outil MCP porte un nom libre (serveur/outil amont).
+    tool: str
+    action: str
+    resource_id: str
     parameters: dict[str, Any]
     reason: str | None = Field(default=None, max_length=500)
     session_id: str
     task_id: str
+
+    @model_validator(mode="after")
+    def _validate_tool_action(self) -> "ActionRequest":
+        if self.tool in _NATIVE_TOOLS:
+            self._validate_native()
+        else:
+            self._validate_mcp()
+        return self
+
+    def _validate_native(self) -> None:
+        """Validations des outils natifs : EXACTEMENT comme avant (aucun assouplissement)."""
+        # action dans l'enum Action.
+        if self.action not in _NATIVE_ACTIONS:
+            raise ValueError(f"action '{self.action}' inconnue")
+        # coherence outil/action.
+        if ACTION_TOOL.get(self.action) != self.tool:
+            raise ValueError(
+                f"action '{self.action}' incohérente avec l'outil '{self.tool}'"
+            )
+        # resource_id : regex native + 128 caracteres max.
+        if len(self.resource_id) > 128 or not _RESOURCE_ID_RE.match(self.resource_id):
+            raise ValueError(f"resource_id '{self.resource_id}' invalide")
+        # parametres stricts par action.
+        model = PARAMS_MODELS[self.action]
+        model.model_validate(self.parameters)
+
+    def _validate_mcp(self) -> None:
+        """Validations de forme d'un outil MCP ; l'existence est vérifiée par le pipeline."""
+        if not _MCP_TOOL_RE.match(self.tool):
+            raise ValueError(f"nom de serveur MCP '{self.tool}' invalide")
+        if not _MCP_ACTION_RE.match(self.action):
+            raise ValueError(f"nom d'outil MCP '{self.action}' invalide")
+        if not (1 <= len(self.resource_id) <= MCP_RESOURCE_MAX_LEN):
+            raise ValueError("resource_id MCP de longueur invalide")
+        if _has_control_char(self.resource_id):
+            raise ValueError("resource_id MCP contient un caractère de contrôle")
+        if len(self.parameters) > MCP_PARAMS_MAX_KEYS:
+            raise ValueError("parameters MCP : trop de clés")
+        if len(canonical_json(self.parameters)) > MCP_PARAMS_MAX_JSON:
+            raise ValueError("parameters MCP : sérialisation trop longue")
 
 
 # --- Contrat 7 : hash canonique -----------------------------------------------

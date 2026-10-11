@@ -22,8 +22,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from contracts.models import (
-    ACTION_TOOL,
-    PARAMS_MODELS,
+    _NATIVE_TOOLS,
     ActionRequest,
     Decision,
     RiskSignal,
@@ -37,7 +36,7 @@ from police.identity import IdentityRegistry
 from police.policy.engine import Policy, evaluate, recipient_facts
 from police.policy.taint import TaintTracker
 
-SENSITIVE_ACTIONS = {"share_file", "delete_file", "send_email"}
+SENSITIVE_ACTIONS = {"share_file", "delete_file", "send_email", "write"}
 # Couples (action, resource_id) qui dispensent du controle d'ACL (contrat 3) :
 # seuls list_files/root et send_email/none sont exemptes.
 EXEMPT_PAIRS = {("list_files", "root"), ("send_email", "none")}
@@ -92,27 +91,36 @@ class Pipeline:
             return EMPTY_HASH
 
     def _validate(self, raw_body: Any):
-        """Valide le corps. Renvoie (request|None, params_valid: bool)."""
+        """Valide le corps. Renvoie (request|None, params_valid: bool).
+
+        ActionRequest valide deja la forme (coherence outil/action et params
+        stricts pour le natif ; contraintes de forme pour le MCP). Pour un outil
+        non natif, on exige en plus que l'action canonique soit resolvable
+        (serveur present et outil declare dans son manifeste), sinon DENY R-DENY-06.
+        """
         if not isinstance(raw_body, dict):
             return None, False
         try:
             request = ActionRequest.model_validate(raw_body)
         except Exception:
             return None, False
-        action = request.action.value
-        tool = request.tool.value
-        # Coherence outil/action.
-        if ACTION_TOOL.get(action) != tool:
-            return request, False
-        # Parametres stricts par action.
-        model = PARAMS_MODELS.get(action)
-        if model is None:
-            return request, False
-        try:
-            model.model_validate(request.parameters)
-        except Exception:
+        if request.tool not in _NATIVE_TOOLS and self._canonical_action(request) is None:
+            # Serveur inconnu ou outil absent du manifeste : fail closed.
             return request, False
         return request, True
+
+    def _canonical_action(self, request: ActionRequest) -> str | None:
+        """Action canonique du contrat 1 (read_file, share_file...).
+
+        Outil natif : l'action est deja canonique. Outil MCP : on la derive via
+        le connecteur amont (canonical_action), None si serveur/outil inconnu.
+        """
+        if request.tool in _NATIVE_TOOLS:
+            return request.action
+        connector = self._connectors.get(request.tool)
+        if connector is None or not hasattr(connector, "canonical_action"):
+            return None
+        return connector.canonical_action(request.action)
 
     # ------------------------------------------------------------------ facts
 
@@ -150,13 +158,18 @@ class Pipeline:
         if request is None:
             return facts, resource_info, taint_sources
 
-        action = request.action.value
-        tool = request.tool.value
+        tool = request.tool
+        # Action CANONIQUE : identique a request.action pour un outil natif,
+        # derivee du manifeste pour un outil MCP. C'est elle qui pilote la
+        # politique, les droits et le taint ; describe() recoit le nom d'origine.
+        action = self._canonical_action(request)
         facts["action"] = action
         facts["sensitive"] = action in SENSITIVE_ACTIONS
 
-        # action_allowed n'est pose que si l'identite est verifiee.
-        if identity_ok and identity is not None:
+        # action_allowed n'est pose que si l'identite est verifiee ET que
+        # l'action canonique est resolvable (sinon la requete est deja invalide :
+        # on laisse R-DENY-06 seul, sans R-DENY-02 parasite).
+        if identity_ok and identity is not None and action is not None:
             allowed = identity.get("allowed", {}) or {}
             facts["action_allowed"] = action in allowed.get(tool, [])
 
@@ -169,7 +182,7 @@ class Pipeline:
             else:
                 try:
                     resource_info = connector.describe(
-                        action, request.resource_id, request.parameters
+                        request.action, request.resource_id, request.parameters
                     )
                 except Exception:
                     # describe ne doit jamais faire planter le pipeline :
@@ -221,19 +234,21 @@ class Pipeline:
         fiable. N'ecrit PAS APPROVAL_DECIDED.
         """
         policy_version = self._policy.version
-        connector = self._connectors[request.tool.value]
+        connector = self._connectors[request.tool]
+        canonical = self._canonical_action(request)
         try:
             result = connector.execute(
-                request.action.value, request.resource_id, request.parameters
+                request.action, request.resource_id, request.parameters
             )
             self._vault.record(
                 "EXECUTED", action_id, {"result": result}, policy_version
             )
             # Taint apres une lecture reussie d'une ressource non fiable :
             # on contamine la session ET l'identite reelle (que l'agent ne peut
-            # pas changer en basculant de session).
+            # pas changer en basculant de session). On se base sur l'action
+            # CANONIQUE (read_file), que l'outil soit natif ou MCP.
             if (
-                request.action.value == "read_file"
+                canonical == "read_file"
                 and isinstance(result, dict)
                 and result.get("trusted") is False
             ):
