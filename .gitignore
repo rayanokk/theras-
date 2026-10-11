@@ -227,3 +227,8 @@ __marimo__/
 !.env.example
 bench/results/
 datagen/cache/
+
+datagen/cache/
+bench/results/
+Claudeforgemcp.pdf
+Theras_v2_Plan_MCP_Forge.docx
