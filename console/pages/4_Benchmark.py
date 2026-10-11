@@ -10,11 +10,18 @@ from pathlib import Path
 import streamlit as st
 
 from console import theme
+from console.bench_runner import (
+    N_DEFAULT,
+    N_MAX,
+    N_MIN,
+    run_new_benchmark,
+)
 from console.bench_view import (
     corrections,
     default_results_path,
     example_results_path,
     failed_malicious_scenarios,
+    forge_results_files,
     load_results,
     metric,
     ratio_parts,
@@ -67,6 +74,101 @@ def _existing(path_str: str) -> Path | None:
     return p if p.is_file() else None
 
 
+# --- Nouveau benchmark (génération Forge + rejeu) --------------------------
+FORGE_LLM_ALLOWED = os.environ.get("FORGE_LLM_ENABLED", "").strip().lower() == "true"
+_RUNNING_KEY = "bench_running"
+_LAST_FORGE_KEY = "bench_last_forge"  # chemin du dernier results_forge produit
+
+if _RUNNING_KEY not in st.session_state:
+    st.session_state[_RUNNING_KEY] = False
+
+theme.section(
+    "Nouveau benchmark",
+    "Génère N scénarios avec Forge, les vérifie, puis les rejoue contre le Gateway.",
+)
+
+running = bool(st.session_state[_RUNNING_KEY])
+col_n, col_llm = st.columns([2, 3])
+n_value = col_n.number_input(
+    "Nombre de scénarios (N)",
+    min_value=N_MIN,
+    max_value=N_MAX,
+    value=N_DEFAULT,
+    step=1,
+    disabled=running,
+    help=f"Entre {N_MIN} et {N_MAX}. La valeur est aussi bornée côté code.",
+)
+
+if FORGE_LLM_ALLOWED:
+    use_llm = col_llm.checkbox(
+        "Générer avec le LLM (Bedrock)", value=False, disabled=running
+    )
+else:
+    use_llm = False
+    col_llm.caption(
+        "Mode sans LLM forcé : FORGE_LLM_ENABLED n’est pas « true », "
+        "la génération utilise le fallback déterministe de Forge."
+    )
+
+launch = st.button(
+    "🔨 Nouveau benchmark",
+    type="primary",
+    disabled=running,
+    use_container_width=False,
+)
+
+if launch and not running:
+    st.session_state[_RUNNING_KEY] = True
+    result = None
+    try:
+        with st.status("Benchmark en cours…", expanded=True) as status:
+            labels = {
+                "génération": "Génération des scénarios (Forge)…",
+                "vérification": "Vérification par l’oracle…",
+                "rejeu": "Rejeu contre le Gateway…",
+            }
+
+            def _progress(step: str) -> None:
+                status.update(label=labels.get(step, step))
+                theme.render(f'<div class="sd-kv">▶ {theme.esc(labels.get(step, step))}</div>')
+
+            result = run_new_benchmark(
+                n_value, use_llm=use_llm, on_progress=_progress
+            )
+            if result.ok:
+                status.update(label="Benchmark terminé.", state="complete")
+            else:
+                status.update(label="Benchmark interrompu.", state="error")
+    finally:
+        st.session_state[_RUNNING_KEY] = False
+
+    if result is not None and result.ok:
+        st.session_state[_LAST_FORGE_KEY] = str(result.results_path)
+        if result.verify_skipped:
+            theme.render(
+                '<div class="sd-mode sd-amber"><span class="sd-dot"></span>'
+                "Vérification oracle indisponible pour ce jeu "
+                "(verify ne prend pas encore de chemin)</div>"
+            )
+        theme.render(
+            '<div class="sd-card sd-green sd-toned"><div class="sd-state-t">'
+            f"Jeu généré : {theme.esc(result.n)} scénarios, mode "
+            f"{theme.esc('LLM' if result.use_llm else 'sans LLM')}</div>"
+            '<div class="sd-state-d">Résultats : '
+            f'<span class="sd-mono">{theme.esc(result.results_path.name)}</span></div></div>'
+        )
+    elif result is not None:
+        tail = result.stderr_tail or "(pas de sortie d’erreur)"
+        theme.render(
+            '<div class="sd-card sd-red sd-toned"><div class="sd-state-t">'
+            f"Échec à l’étape « {theme.esc(result.error_step or '?')} » : "
+            f"{theme.esc(result.error_message)}</div>"
+            '<div class="sd-state-d">20 dernières lignes de stderr :</div>'
+            f'<pre class="sd-mono" style="white-space:pre-wrap;overflow-x:auto;">'
+            f"{theme.esc(tail)}</pre></div>"
+        )
+
+
 # Sélection de la source par ordre de priorité :
 #   1. BENCH_RESULTS_PATH (si la variable est définie et pointe un fichier)
 #   2. results.json dans le dossier de résultats
@@ -86,23 +188,49 @@ withllm = results_dir / "results_llm.json"
 source_path: Path | None = None
 is_example = False
 
+# Jeux générés par Forge dans ce dossier, du plus récent au plus ancien.
+forge_files = forge_results_files(results_dir)
+last_forge = st.session_state.get(_LAST_FORGE_KEY)
+
+# 0. Jeu Forge qui vient d'être produit dans cette session : affiché directement.
+if last_forge:
+    source_path = _existing(last_forge)
+
 # 1. Variable d'environnement explicite.
-if configured_env:
+if source_path is None and configured_env:
     source_path = _existing(configured_env)
 
 # 2. results.json dans le dossier de résultats.
 if source_path is None:
     source_path = _existing(str(results_dir / "results.json"))
 
-# 3. Fichiers produits par run_bench.py (sans LLM / avec LLM).
+# 3. Sélecteur : fichiers produits par run_bench.py (sans LLM / avec LLM) ET
+#    jeux générés par Forge. S'il n'y a que les deux modes et aucun jeu Forge,
+#    on garde le sélecteur « Mode d'exécution » historique (radio).
 if source_path is None:
-    if nollm.is_file() and withllm.is_file():
+    if not forge_files and nollm.is_file() and withllm.is_file():
         choice = st.radio("Mode d’exécution", ["sans LLM", "avec LLM"], horizontal=True)
         source_path = nollm if choice == "sans LLM" else withllm
-    elif nollm.is_file():
-        source_path = nollm
-    elif withllm.is_file():
-        source_path = withllm
+    else:
+        selectable: list[Path] = []
+        if nollm.is_file():
+            selectable.append(nollm)
+        if withllm.is_file():
+            selectable.append(withllm)
+        selectable.extend(forge_files)
+        if len(selectable) == 1:
+            source_path = selectable[0]
+        elif selectable:
+            labels = {str(p): p.name for p in selectable}
+            options = [str(p) for p in selectable]
+            chosen = st.selectbox(
+                "Jeu de résultats",
+                options,
+                index=0,
+                format_func=lambda s: labels.get(s, s),
+                disabled=running,
+            )
+            source_path = _existing(chosen)
 
 # 4. Exemple fourni avec le dépôt.
 if source_path is None:
@@ -141,6 +269,16 @@ theme.render(
     f'<div class="sd-kv">Run : mode <b>{theme.esc(run_mode)}</b> · '
     f"généré le <b>{theme.esc(generated)}</b></div>"
 )
+
+# Bandeau « Jeu généré par Forge » quand on affiche un fichier results_forge_*.
+if source_path.name.startswith("results_forge_"):
+    scenarios_n = meta.get("scenarios_total", summary.get("total", "—"))
+    mode_txt = "sans LLM" if str(run_mode) == "no-llm" else str(run_mode)
+    theme.render(
+        '<div class="sd-mode sd-cyan"><span class="sd-dot"></span>'
+        f"Jeu généré par Forge : {theme.esc(scenarios_n)} scénarios, mode "
+        f"{theme.esc(mode_txt)}, généré le {theme.esc(generated)}</div>"
+    )
 
 
 # --- KPI --------------------------------------------------------------------

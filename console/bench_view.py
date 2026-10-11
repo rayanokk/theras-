@@ -184,3 +184,14 @@ def default_results_path() -> Path:
 def example_results_path() -> Path:
     """Chemin du fichier d'exemple fourni avec le dépôt."""
     return Path("bench/results/EXAMPLE_results.json")
+
+
+def forge_results_files(results_dir) -> list[Path]:
+    """Liste les fichiers results_forge_*.json d'un dossier, du plus récent au
+    plus ancien (ordre lexicographique inverse : l'horodatage est triable)."""
+    directory = Path(results_dir)
+    try:
+        files = [p for p in directory.glob("results_forge_*.json") if p.is_file()]
+    except OSError:
+        return []
+    return sorted(files, reverse=True)
