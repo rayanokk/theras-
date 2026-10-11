@@ -63,29 +63,49 @@ def _existing(path_str: str) -> Path | None:
     return p if p.is_file() else None
 
 
-# Sélection de la source, avec bascule sans LLM / avec LLM si les deux existent.
-configured = os.environ.get(ENV_BENCH_PATH, str(default_results_path()))
-results_dir = Path(configured).parent if configured else Path("bench/results")
-nollm = results_dir / "results_nollm.json"
+# Sélection de la source par ordre de priorité :
+#   1. BENCH_RESULTS_PATH (si la variable est définie et pointe un fichier)
+#   2. results.json dans le dossier de résultats
+#   3. results_no-llm.json / results_llm.json (sélecteur si les deux existent)
+#   4. l'exemple fourni (bandeau ambre)
+# Le « dossier de résultats » est celui du chemin demandé par la variable (son
+# parent), sinon le dossier par défaut bench/results. Les fichiers compagnons
+# (results.json, results_no-llm.json, results_llm.json) y sont cherchés.
+default_path = default_results_path()  # bench/results/results.json
+configured_env = os.environ.get(ENV_BENCH_PATH)
+results_dir = (
+    Path(configured_env).parent if configured_env else default_path.parent
+)
+nollm = results_dir / "results_no-llm.json"
 withllm = results_dir / "results_llm.json"
 
 source_path: Path | None = None
 is_example = False
 
-if nollm.is_file() and withllm.is_file():
-    choice = st.radio(
-        "Mode d’exécution",
-        ["sans LLM", "avec LLM"],
-        horizontal=True,
-    )
-    source_path = nollm if choice == "sans LLM" else withllm
-else:
-    source_path = _existing(configured)
-    if source_path is None:
-        example = _existing(str(example_results_path()))
-        if example is not None:
-            source_path = example
-            is_example = True
+# 1. Variable d'environnement explicite.
+if configured_env:
+    source_path = _existing(configured_env)
+
+# 2. results.json dans le dossier de résultats.
+if source_path is None:
+    source_path = _existing(str(results_dir / "results.json"))
+
+# 3. Fichiers produits par run_bench.py (sans LLM / avec LLM).
+if source_path is None:
+    if nollm.is_file() and withllm.is_file():
+        choice = st.radio("Mode d’exécution", ["sans LLM", "avec LLM"], horizontal=True)
+        source_path = nollm if choice == "sans LLM" else withllm
+    elif nollm.is_file():
+        source_path = nollm
+    elif withllm.is_file():
+        source_path = withllm
+
+# 4. Exemple fourni avec le dépôt.
+if source_path is None:
+    example = _existing(str(example_results_path()))
+    if example is not None:
+        source_path = example
+        is_example = True
 
 if source_path is None:
     theme.mode_banner()

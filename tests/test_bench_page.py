@@ -80,3 +80,75 @@ def test_page_survives_missing_metrics(monkeypatch, tmp_path):
     assert "Durcissements par l\u2019IA" not in html
     assert "Autres mesures" not in html
     assert "30 attaques rejou" in html
+
+
+# --- Ordre de priorité de la source --------------------------------------
+
+def _run_env(monkeypatch, env_path) -> tuple[AppTest, str]:
+    """Lance la page avec BENCH_RESULTS_PATH = env_path (fichier éventuellement absent).
+
+    Chaque fichier de résultats écrit porte un marqueur `_source` dans une mesure
+    inconnue, pour reconnaître lequel la page a chargé via « Autres mesures »."""
+    monkeypatch.setenv("BENCH_RESULTS_PATH", str(env_path))
+    at = AppTest.from_file(PAGE, default_timeout=60)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    return at, "\n".join(m.value for m in at.markdown)
+
+
+def _write_tagged(path: Path, tag: str) -> None:
+    data = _base()
+    data["metrics"]["source_tag"] = tag
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _loaded_tag(html: str) -> str | None:
+    """Récupère le marqueur du fichier réellement chargé (via Autres mesures)."""
+    for tag in ("ENV", "DEFAULT", "NOLLM", "LLM"):
+        # Le tag est une valeur de mesure inconnue : il n'apparaît que s'il est chargé.
+        if f">{tag}<" in html:
+            return tag
+    return None
+
+
+def test_env_path_has_top_priority(monkeypatch, tmp_path):
+    env_file = tmp_path / "chosen.json"
+    _write_tagged(env_file, "ENV")
+    _write_tagged(tmp_path / "results.json", "DEFAULT")
+    _write_tagged(tmp_path / "results_no-llm.json", "NOLLM")
+    _write_tagged(tmp_path / "results_llm.json", "LLM")
+    _, html = _run_env(monkeypatch, env_file)
+    assert _loaded_tag(html) == "ENV"
+
+
+def test_results_json_used_when_env_path_missing(monkeypatch, tmp_path):
+    # La variable pointe un fichier absent : on retombe sur results.json du dossier.
+    _write_tagged(tmp_path / "results.json", "DEFAULT")
+    _write_tagged(tmp_path / "results_no-llm.json", "NOLLM")
+    _write_tagged(tmp_path / "results_llm.json", "LLM")
+    _, html = _run_env(monkeypatch, tmp_path / "absent.json")
+    assert _loaded_tag(html) == "DEFAULT"
+
+
+def test_mode_selector_when_both_llm_files_exist(monkeypatch, tmp_path):
+    # Pas de results.json : les deux fichiers run_bench.py activent le sélecteur.
+    _write_tagged(tmp_path / "results_no-llm.json", "NOLLM")
+    _write_tagged(tmp_path / "results_llm.json", "LLM")
+    at, html = _run_env(monkeypatch, tmp_path / "absent.json")
+    assert len(at.radio) == 1
+    assert at.radio[0].options == ["sans LLM", "avec LLM"]
+    # Par défaut le premier choix (sans LLM) est sélectionné.
+    assert _loaded_tag(html) == "NOLLM"
+
+
+def test_single_llm_file_used_without_selector(monkeypatch, tmp_path):
+    _write_tagged(tmp_path / "results_llm.json", "LLM")
+    at, html = _run_env(monkeypatch, tmp_path / "absent.json")
+    assert len(at.radio) == 0  # pas de sélecteur si un seul fichier
+    assert _loaded_tag(html) == "LLM"
+
+
+def test_falls_back_to_example_when_nothing_present(monkeypatch, tmp_path):
+    # Dossier vide, aucun fichier reconnu : repli sur l'exemple + bandeau ambre.
+    _, html = _run_env(monkeypatch, tmp_path / "absent.json")
+    assert "Donn\u00e9es d\u2019exemple" in html
