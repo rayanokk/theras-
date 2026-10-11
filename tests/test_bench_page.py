@@ -79,7 +79,8 @@ def test_page_survives_missing_metrics(monkeypatch, tmp_path):
     html = _run(monkeypatch, tmp_path, data)
     assert "Durcissements par l\u2019IA" not in html
     assert "Autres mesures" not in html
-    assert "30 attaques rejou" in html
+    # L'exemple contient 30 scénarios : le titre affiche le nombre réel.
+    assert "30 attaques rejouées automatiquement" in html
 
 
 # --- Ordre de priorité de la source --------------------------------------
@@ -298,3 +299,75 @@ def test_llm_enabled_shows_checkbox(monkeypatch, tmp_path):
     at = _run_app(monkeypatch, tmp_path)
     labels = [c.label for c in at.checkbox]
     assert "Générer avec le LLM (Bedrock)" in labels
+
+
+# --- Sous-titre « Scénarios » dynamique -----------------------------------
+
+def test_scenarios_subtitle_uses_real_count(monkeypatch, tmp_path):
+    data = _base()
+    data["scenarios"] = [
+        {"id": f"G-{i:02d}", "categorie": "legitime", "result": "OK", "steps": []}
+        for i in range(20)
+    ]
+    html = _run(monkeypatch, tmp_path, data)
+    assert "Les 20 scénarios du benchmark" in html
+    assert "Les 30 scénarios" not in html
+
+
+def test_scenarios_subtitle_singular(monkeypatch, tmp_path):
+    data = _base()
+    data["scenarios"] = [
+        {"id": "G-01", "categorie": "legitime", "result": "OK", "steps": []}
+    ]
+    html = _run(monkeypatch, tmp_path, data)
+    assert "Le 1 scénario du benchmark, filtrable." in html
+
+
+def test_scenarios_subtitle_when_no_scenarios(monkeypatch, tmp_path):
+    data = _base()
+    data["scenarios"] = []
+    html = _run(monkeypatch, tmp_path, data)
+    assert "Scénarios du benchmark, filtrables." in html
+    assert "Les 30 scénarios" not in html
+
+
+# --- Titre : nombre réel d'attaques ---------------------------------------
+
+def test_hero_shows_real_scenario_count(monkeypatch, tmp_path):
+    data = _base()
+    data["scenarios"] = [
+        {"id": f"G-{i:02d}", "categorie": "legitime", "result": "OK", "steps": []}
+        for i in range(60)
+    ]
+    html = _run(monkeypatch, tmp_path, data)
+    assert "60 attaques rejouées automatiquement" in html
+    assert "30 attaques" not in html
+
+
+def test_hero_without_scenarios_has_no_number(monkeypatch, tmp_path):
+    import re
+    data = _base()
+    data["scenarios"] = []
+    html = _run(monkeypatch, tmp_path, data)
+    assert "Attaques rejouées automatiquement" in html
+    # Aucun « <nombre> attaques rejouées » (titre sans compteur).
+    assert not re.search(r"\d+\s+attaques rejouées", html)
+
+
+# --- Bouton « Nouveau benchmark » : lisibilité ----------------------------
+
+def test_new_benchmark_button_present_and_default_label(monkeypatch, tmp_path):
+    at = _run_app(monkeypatch, tmp_path)
+    labels = [b.label for b in at.button]
+    assert "🔨 Nouveau benchmark" in labels
+    # Pas en cours : le libellé « en cours… » n'est pas affiché.
+    assert "⏳ Benchmark en cours…" not in labels
+
+
+def test_new_benchmark_button_has_scoped_dark_style():
+    # Le style lisible (texte sombre #0B1020) est scoppé à ce bouton seul.
+    from console import theme as T
+    css = T._CSS
+    assert ".st-key-btn_new_bench button" in css
+    assert "#0B1020" in css
+    assert ".st-key-btn_new_bench button:disabled" in css  # état désactivé scoppé
