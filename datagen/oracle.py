@@ -25,9 +25,9 @@ from datagen import faits
 
 
 class Oracle:
-    def __init__(self, policies_path: str | None = None, use_risk: bool = False):
+    def __init__(self, policies_path: str | None = None, use_risk: bool = True):
         self.policy = load_policy(policies_path or os.getenv("POLICIES_PATH", "policies/policies.yaml"))
-        self.use_risk = use_risk   # True = calcule risk_score via heuristiques (mode LLM/risk)
+        self.use_risk = use_risk  # Toujours True par défaut pour Forge
 
     # -------------------------------------------------- calcul des faits d'un cas
     def _facts(self, *, agent, action, resource_id, recipient_domain,
@@ -80,7 +80,7 @@ class Oracle:
         return facts
 
     def _risk_facts(self, facts, resource_id, recipient_domain) -> dict:
-        """Score heuristique, pour reproduire R-REV-04. Réutilise le scoreur du projet."""
+        """Score heuristique, pour reproduire R-REV-04."""
         try:
             from contracts.models import ActionRequest, ResourceInfo
             from police.risk.heuristics import score_action
@@ -89,12 +89,12 @@ class Oracle:
                 action=facts["action"], resource_id=resource_id,
                 parameters={}, session_id="oracle", task_id="oracle")
             res = ResourceInfo(exists=True, classification=facts["classification"],
-                               trusted=True, recipient_domain=recipient_domain)
+                            trusted=True, recipient_domain=recipient_domain)
             sig = score_action(req, res, facts["session_tainted"] or facts["agent_tainted"])
             return {"risk_score": sig.score or 0.0, "risk_unavailable": False}
         except Exception:
-            # Si le scoreur échoue, on reste fail-safe : pas de score, pas de R-REV-04 par score.
-            return {"risk_unavailable": False}
+            # Si le scoreur échoue, pas de score → pas de R-REV-04 par score
+            return {"risk_score": 0.0, "risk_unavailable": True}
 
     # ------------------------------------------------------------------- verdict
     def verdict(self, *, agent, action, resource_id="none", recipient_domain=None,

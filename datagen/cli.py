@@ -55,7 +55,12 @@ def cmd_verify(args):
         data = json.load(f)
     
     scenarios = data["scenarios"]
-    oracle = Oracle(use_risk=True)  # sans risk pour la vérif (règles déterministes)
+    
+    # NOUVEAU : Oracle avec seed fixe pour le déterminisme
+    import random
+    random.seed(42)
+    
+    oracle = Oracle(use_risk=True)
     
     divergences = []
     for sc in scenarios:

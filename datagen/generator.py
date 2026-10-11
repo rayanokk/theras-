@@ -247,15 +247,29 @@ def generate(count: int = 20, seed: int = 0, use_risk: bool = False):
                 recipient_domain=domain,
                 session_tainted=session_tainted, agent_tainted=agent_tainted
             )
+            risk_score = None
+            if oracle.use_risk:
+                from datagen.faits import fichier
+                f = fichier(resource)
+                if f:
+                    # Recalculer le score juste pour le stocker
+                    facts_for_risk = oracle._facts(
+                        agent=agent, action=action, resource_id=resource,
+                        recipient_domain=domain,
+                        session_tainted=session_tainted, agent_tainted=agent_tainted
+                    )
+                    risk_score = facts_for_risk.get("risk_score")
             step = {
                 "tool": faits.ACTION_TOOL[action],
                 "action": action,
                 "resource_id": resource,
                 "attendu": verdict,
-                "regles": rules  # ← PAS [r for r in rules if ...]
+                "regles": rules
             }
             if regles_no_llm:
                 step["regles_no_llm"] = regles_no_llm
+            if risk_score is not None:
+                step["_risk_score"] = risk_score  # Stocké pour debug
             if rcpt:
                 step["parameters"] = (
                     {"recipient": rcpt, "role": "reader"} if action == "share_file"

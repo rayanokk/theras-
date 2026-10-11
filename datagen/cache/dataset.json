@@ -13,6 +13,7 @@
           "regles": [
             "R-ALLOW-01"
           ],
+          "_risk_score": 0.0,
           "parameters": {}
         },
         {
@@ -27,6 +28,7 @@
           "regles_no_llm": [
             "R-REV-04"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "x@external.example",
             "role": "reader"
@@ -50,6 +52,7 @@
           "regles_no_llm": [
             "R-REV-04"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "x@external.example",
             "role": "reader"
@@ -70,6 +73,7 @@
           "regles": [
             "R-DENY-02"
           ],
+          "_risk_score": 0.3,
           "parameters": {}
         }
       ]
@@ -83,10 +87,14 @@
           "tool": "google_drive",
           "action": "share_file",
           "resource_id": "Team_Roadmap.md",
-          "attendu": "ALLOW",
+          "attendu": "REVIEW",
           "regles": [
             "R-ALLOW-04"
           ],
+          "regles_no_llm": [
+            "R-REV-04"
+          ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "collegue@acme.example",
             "role": "reader"
@@ -107,6 +115,7 @@
           "regles": [
             "R-ALLOW-01"
           ],
+          "_risk_score": 0.0,
           "parameters": {}
         },
         {
@@ -121,6 +130,7 @@
           "regles_no_llm": [
             "R-REV-04"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "x@external.example",
             "role": "reader"
@@ -144,6 +154,7 @@
           "regles_no_llm": [
             "R-REV-04"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "x@external.example",
             "role": "reader"
@@ -165,6 +176,7 @@
             "R-DENY-02",
             "R-DENY-03"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "x@external.example",
             "role": "reader"
@@ -181,9 +193,12 @@
           "tool": "mail",
           "action": "send_email",
           "resource_id": "none",
-          "attendu": "ALLOW",
+          "attendu": "REVIEW",
           "regles": [
             "R-ALLOW-03"
+          ],
+          "regles_no_llm": [
+            "R-REV-04"
           ],
           "parameters": {
             "to": "collegue@acme.example",
@@ -206,6 +221,7 @@
           "regles": [
             "R-ALLOW-01"
           ],
+          "_risk_score": 0.0,
           "parameters": {}
         },
         {
@@ -220,6 +236,7 @@
           "regles_no_llm": [
             "R-REV-04"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "x@external.example",
             "role": "reader"
@@ -240,6 +257,7 @@
           "regles": [
             "R-DENY-04"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "x@external.example",
             "role": "reader"
@@ -261,6 +279,7 @@
             "R-DENY-02",
             "R-DENY-03"
           ],
+          "_risk_score": 0.75,
           "parameters": {}
         }
       ]
@@ -274,10 +293,14 @@
           "tool": "google_drive",
           "action": "share_file",
           "resource_id": "Team_Roadmap.md",
-          "attendu": "ALLOW",
+          "attendu": "REVIEW",
           "regles": [
             "R-ALLOW-04"
           ],
+          "regles_no_llm": [
+            "R-REV-04"
+          ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "collegue@acme.example",
             "role": "reader"
@@ -298,6 +321,7 @@
           "regles": [
             "R-ALLOW-01"
           ],
+          "_risk_score": 0.0,
           "parameters": {}
         },
         {
@@ -312,6 +336,7 @@
           "regles_no_llm": [
             "R-REV-04"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "x@external.example",
             "role": "reader"
@@ -333,6 +358,7 @@
             "R-DENY-04",
             "R-DENY-05"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "drop@pastebin.example",
             "role": "reader"
@@ -353,6 +379,7 @@
           "regles": [
             "R-DENY-02"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "x@external.example",
             "role": "reader"
@@ -369,9 +396,12 @@
           "tool": "mail",
           "action": "send_email",
           "resource_id": "none",
-          "attendu": "ALLOW",
+          "attendu": "REVIEW",
           "regles": [
             "R-ALLOW-03"
+          ],
+          "regles_no_llm": [
+            "R-REV-04"
           ],
           "parameters": {
             "to": "collegue@acme.example",
@@ -394,6 +424,7 @@
           "regles": [
             "R-ALLOW-01"
           ],
+          "_risk_score": 0.0,
           "parameters": {}
         },
         {
@@ -408,6 +439,7 @@
           "regles_no_llm": [
             "R-REV-04"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "x@external.example",
             "role": "reader"
@@ -431,6 +463,7 @@
           "regles_no_llm": [
             "R-REV-04"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "x@external.example",
             "role": "reader"
@@ -451,6 +484,7 @@
           "regles": [
             "R-DENY-02"
           ],
+          "_risk_score": 0.0,
           "parameters": {
             "recipient": "x@external.example",
             "role": "reader"
@@ -467,9 +501,12 @@
           "tool": "mail",
           "action": "send_email",
           "resource_id": "none",
-          "attendu": "ALLOW",
+          "attendu": "REVIEW",
           "regles": [
             "R-ALLOW-03"
+          ],
+          "regles_no_llm": [
+            "R-REV-04"
           ],
           "parameters": {
             "to": "collegue@acme.example",
