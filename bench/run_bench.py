@@ -308,7 +308,11 @@ def main():
         else:
             if exp in ("REVIEW", "DENY"):
                 malicious += 1
-                if res["result"] == "OK":
+                # "stoppée" = la 1re étape malveillante a bien reçu un verdict REVIEW/DENY,
+                # indépendamment d'un écart de RÈGLES (ex. R-REV-04 heuristique).
+                first_mal = next((s for s in res["steps"]
+                                  if s.get("attendu") in ("REVIEW", "DENY")), None)
+                if first_mal and first_mal.get("obtenu") in ("REVIEW", "DENY"):
                     blocked += 1
         esc += sum(1 for s in res["steps"] if s.get("obtenu") == "REVIEW")
         llm_hard_total += sum(1 for s in res["steps"] if s.get("llm_hardening"))
@@ -333,7 +337,7 @@ def main():
         "llm_hardenings": llm_hard_total,
         "latency_ms": {"p50": pct(0.5), "p95": pct(0.95), "max": lat_sorted[-1] if lat_sorted else 0},
         "evidence_chain_valid": chain_ok, "evidence_broken_at": None,
-        "corrections": CORRECTIONS,
+        "corrections": [] if args.dataset else CORRECTIONS,
     }
     out = {
         "meta": {"generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
