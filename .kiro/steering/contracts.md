@@ -379,3 +379,101 @@ le reste est inchangé. Hors des droits de l'agent ou de l'ACL, c'est toujours D
 | GET | `/health` | tous |
 
 L'agent attend la fin d'une REVIEW en interrogeant `GET /v1/actions/{id}` toutes les 2 secondes.
+
+---
+
+## Partie 4 : pare-feu MCP
+
+Theras peut se placer devant des serveurs MCP tiers (amont). On ne code rien de spécifique à
+chaque serveur : un **manifeste** déclare l'effet de ses outils, et le Gateway applique la même
+politique que pour les outils natifs. Code : `police/mcp_firewall/`.
+
+### 1. Manifeste (`police/mcp_firewall/manifests/*.yaml`, modèle dans `manifest.py`)
+
+```
+server                  nom du serveur amont
+default_classification  classification par défaut d'une ressource (défaut : internal)
+acl                     liste d'agent_id autorisés (non vide)
+resources               liste de règles : match (motif fnmatch), classification, trusted
+tools                   dict nom_outil -> { effect, resource_from, recipient_from,
+                                            untrusted_output, classification }
+```
+
+Règles de validation (`extra="forbid"` partout) :
+- `server` au format `^[a-z][a-z0-9_]{1,30}$` ; `google_drive` et `mail` sont réservés et refusés.
+- `acl` et `tools` non vides ; une `ResourceRule` doit préciser au moins `classification` ou `trusted`.
+- `recipient_from` obligatoire si `effect` vaut `share` ou `send`.
+- Un outil absent du manifeste n'est pas résolu (fail closed, DENY R-DENY-06).
+
+`resource_facts(resource_id, spec)` : la **classification** vient du premier `ResourceRule` dont le
+motif correspond et qui en précise une, sinon de `spec.classification`, sinon de
+`default_classification`. La **fiabilité** (`trusted`) vient du premier `ResourceRule` correspondant
+qui la précise, sinon vaut `true` ; `untrusted_output: true` sur l'outil force `trusted` à `false`.
+
+### 2. Effets et action canonique (`translate.py`)
+
+| Effet | Action canonique |
+|---|---|
+| read | `read_file` |
+| list | `list_files` |
+| share | `share_file` |
+| delete | `delete_file` |
+| send | `send_email` |
+| write | `write` |
+
+La politique (`policies/policies.yaml`) ne change pas : elle s'applique à l'**action canonique**.
+`write` est une action sensible sans règle ALLOW : elle tombe donc sur R-DENY-DEFAULT (fail closed).
+
+### 3. `ActionRequest` pour un outil MCP
+
+- `tool` = `server` du manifeste ; `action` = nom de l'outil amont ; `parameters` = arguments bruts ;
+  `resource_id` = l'argument désigné par `resource_from`.
+- Validations de forme : `tool` `^[a-z][a-z0-9_]{1,30}$` ; `action` `^[A-Za-z0-9_.-]{1,64}$` ;
+  `resource_id` de 1 à 512 caractères sans caractère de contrôle ; `parameters` d'au plus 20 clés et
+  10 000 caractères une fois sérialisés en JSON.
+- Serveur ou outil inconnu : DENY R-DENY-06.
+- Les outils natifs (`google_drive`, `mail`) gardent exactement leurs validations, et le `params_hash`
+  d'une requête native est inchangé (valeur figée par un test).
+
+### 4. `McpUpstreamConnector` (`connector.py`)
+
+Même interface `Connector` que Drive et Mail. `describe()` répond **uniquement** depuis le manifeste
+(aucun appel amont). `execute()` transmet à l'amont, et ne l'appelle **jamais** pour un outil absent
+du manifeste (`PermissionError`). Pour une lecture, le contenu est déballé (clé `content`, y compris
+si l'amont renvoie une chaîne JSON l'enveloppant) et la fiabilité vient **toujours** du manifeste,
+jamais de la réponse de l'amont. Une REVIEW approuvée est exécutée sur l'amont par le Gateway
+lui-même (`execute_approved`).
+
+### 5. Démarrage (`main.py`, `loader.py`, `upstreams.yaml`)
+
+- `THERAS_MCP_FIREWALL` vaut `false` par défaut : le Gateway est alors **strictement identique** à la
+  version sans pare-feu (aucun manifeste chargé, aucun sous-processus).
+- Avec `true` : chargement des manifestes (`THERAS_MCP_MANIFESTS`) et de `upstreams.yaml`
+  (`THERAS_MCP_UPSTREAMS`) ; un client stdio par amont (sous-processus `python -m <module>`) ; seules
+  les variables d'environnement listées dans `env` sont transmises (plus quelques variables système).
+  Un amont qui ne démarre pas n'est pas enregistré (ses outils donnent R-DENY-06). `register_connector`
+  refuse de remplacer un connecteur existant (jamais Drive ni Mail). Les chemins relatifs sont résolus
+  par rapport à la racine du repo ; si aucun amont n'est enregistré, un WARNING est journalisé.
+- Les droits par serveur sont dans `data/identities.json` (ex. `"demo_drive"` dans `allowed`).
+
+### 6. Façade MCP (`police/mcp_firewall/proxy.py`)
+
+La façade est la PRISE que voit l'agent : un serveur MCP stdio qui expose les outils amont sous le nom
+`server__tool` (double underscore). Elle ne décide rien et ne contacte aucun amont : chaque appel
+devient un `POST /v1/actions` avec `X-API-Key = THERAS_AGENT_KEY`, jamais d'`agent_id` (le Gateway
+déduit l'identité de la clé).
+
+- La correspondance nom affiché → `(server, tool)` passe par une **table** construite au démarrage ;
+  on ne redécoupe jamais la chaîne. Une collision de noms affichés fait **échouer le démarrage**, de
+  même qu'un outil amont qui produirait le nom réservé `theras__get_action_status`.
+- Les **descriptions** exposées sont reconstruites depuis le manifeste, jamais reprises de l'amont.
+- Une REVIEW : attente bornée, puis message « approbation humaine requise » renvoyant vers l'outil
+  interne `theras__get_action_status` ; l'agent ne relance jamais l'outil.
+
+Écart à signaler (le code ne fait pas encore ce que la cible décrit) : la façade n'inspecte pas et ne
+filtre pas le schéma d'entrée de l'amont. `list_tools` expose un schéma générique
+(`{"type": "object", "additionalProperties": true}`) ; il n'y a donc ni liste blanche récursive du
+schéma, ni validation des noms d'arguments (`^[A-Za-z_][A-Za-z0-9_]{0,40}$`), ni limite sur les valeurs
+d'enum, ni mise à l'écart d'un outil au schéma suspect. Ces défenses contre le *tool poisoning* par le
+schéma restent à implémenter dans `proxy.py`. La protection actuelle contre le tool poisoning se limite
+à la description reconstruite depuis le manifeste.
