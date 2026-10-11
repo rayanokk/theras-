@@ -61,14 +61,6 @@ def _has_expectation(step: dict) -> bool:
 
 
 # --- Source des résultats --------------------------------------------------
-theme.hero(
-    "Benchmark",
-    "30 attaques rejouées automatiquement",
-    "Chaque scénario envoie de vraies requêtes au Gateway et compare le verdict "
-    "obtenu au verdict attendu. Les écarts sont montrés tels quels.",
-)
-
-
 def _existing(path_str: str) -> Path | None:
     p = Path(path_str)
     return p if p.is_file() else None
@@ -108,10 +100,11 @@ else:
     use_llm = False
 
 launch = st.button(
-    "🔨 Nouveau benchmark",
+    "⏳ Benchmark en cours…" if running else "🔨 Nouveau benchmark",
     type="primary",
     disabled=running,
     use_container_width=False,
+    key="btn_new_bench",
 )
 
 if launch and not running:
@@ -259,6 +252,20 @@ if is_example:
 meta = results.get("meta") or {}
 metrics = results.get("metrics") or {}
 summary = summarize(results)
+
+# Titre : nombre réel d'attaques (scénarios) du fichier affiché. Sans liste de
+# scénarios, on n'affiche aucun nombre.
+_hero_scenarios = results.get("scenarios")
+if isinstance(_hero_scenarios, list) and _hero_scenarios:
+    _hero_subtitle = f"{len(_hero_scenarios)} attaques rejouées automatiquement"
+else:
+    _hero_subtitle = "Attaques rejouées automatiquement"
+theme.hero(
+    "Benchmark",
+    _hero_subtitle,
+    "Chaque scénario envoie de vraies requêtes au Gateway et compare le verdict "
+    "obtenu au verdict attendu. Les écarts sont montrés tels quels.",
+)
 
 run_mode = meta.get("mode", "—")
 generated = meta.get("generated_at", "—")
@@ -561,9 +568,16 @@ theme.render(_category_bars(summary["by_category"]))
 
 
 # --- Tableau des scénarios --------------------------------------------------
-theme.section("Scénarios", "Les 30 scénarios du benchmark, filtrables.")
-
 scenarios = [s for s in (results.get("scenarios") or []) if isinstance(s, dict)]
+_n_scenarios = len(scenarios)
+if _n_scenarios == 0:
+    _scenarios_subtitle = "Scénarios du benchmark, filtrables."
+elif _n_scenarios == 1:
+    _scenarios_subtitle = "Le 1 scénario du benchmark, filtrable."
+else:
+    _scenarios_subtitle = f"Les {_n_scenarios} scénarios du benchmark, filtrables."
+theme.section("Scénarios", _scenarios_subtitle)
+
 present_cats = sorted({s.get("categorie") or "inconnu" for s in scenarios}, key=_cat_label)
 
 col_cat, col_res = st.columns([3, 2])

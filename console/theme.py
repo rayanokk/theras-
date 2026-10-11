@@ -294,6 +294,15 @@ button[data-testid="stBaseButton-primary"],button[data-testid="stBaseButton-prim
   background:linear-gradient(90deg,#7C8CFF,#22D3EE);border:none;color:#0A0F1E;font-weight:700;}
 button[data-testid="stBaseButton-primary"]:hover,button[data-testid="stBaseButton-primaryFormSubmit"]:hover{
   box-shadow:0 8px 26px -8px rgba(34,211,238,.7);color:#0A0F1E;}
+/* Bouton « Nouveau benchmark » uniquement (clé st-key-btn_new_bench) : texte
+   sombre et gras sur le dégradé violet-cyan, lisible (contraste > 4,5:1). */
+.st-key-btn_new_bench button{
+  background:linear-gradient(90deg,#8C9BFF,#22D3EE) !important;color:#0B1020 !important;font-weight:700 !important;border:none !important;}
+.st-key-btn_new_bench button *{color:#0B1020 !important;}
+/* État désactivé (run en cours) : reconnaissable, opacité réduite, texte sombre. */
+.st-key-btn_new_bench button:disabled,.st-key-btn_new_bench button[disabled]{
+  opacity:.55 !important;color:#0B1020 !important;cursor:not-allowed !important;}
+.st-key-btn_new_bench button:disabled *{color:#0B1020 !important;}
 [data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div{
   background:#0E1627 !important;border:1px solid #24324F !important;border-radius:12px !important;}
 [data-baseweb="input"] input,[data-baseweb="textarea"] textarea{background:transparent !important;color:#E7ECF5 !important;}
