@@ -248,3 +248,26 @@ def test_http_decide_409_gives_clear_error():
         assert "déjà" in str(excinfo.value).lower()
     finally:
         client.close()
+
+
+def test_labels_action_and_rule():
+    from console.labels import action_label, rule_label
+
+    assert action_label("share_file") == "partager"
+    assert action_label("send_email") == "envoyer par mail"
+    assert action_label("delete_file") == "supprimer"
+    assert action_label("read_file") == "lire"
+    # Règle connue : « explication (R-XXX) ».
+    label = rule_label("R-REV-01")
+    assert label.endswith("(R-REV-01)")
+    assert "confidentiel" in label.lower()
+    # Toutes les règles du contrat ont un libellé.
+    from console.labels import RULE_LABELS
+
+    expected_ids = (
+        [f"R-DENY-0{i}" for i in range(1, 7)]
+        + [f"R-REV-0{i}" for i in range(1, 6)]
+        + [f"R-ALLOW-0{i}" for i in range(1, 5)]
+    )
+    for rid in expected_ids:
+        assert rid in RULE_LABELS
