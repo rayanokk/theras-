@@ -372,13 +372,21 @@ for key in LLM_HARDENING_KEYS:
         break
 
 kpi_items = [
-    ("Scénarios réussis", f"{ok} / {scenarios_total}", scenarios_tone),
-    ("Taux de blocage", _pct(block_rate),
-     block_tone, f"{malicious_blocked if malicious_blocked is not None else '—'} / "
-                 f"{malicious_total if malicious_total is not None else '—'} malveillantes bloquées"),
-    ("Faux positifs",
-     f"{false_positives if false_positives is not None else '—'}",
-     fp_tone, f"sur {legit_total if legit_total is not None else '—'} légitimes"),
+    # Renommé : le verdict peut être correct tout en citant d'autres règles que
+    # l'oracle ; cette carte compte les scénarios sans écart de règles.
+    ("Scénarios sans écart de règles", f"{ok} / {scenarios_total}", scenarios_tone,
+     "verdict correct, mais règles citées différentes de l’oracle pour les autres"),
+]
+# « Taux de blocage » : masqué quand la valeur est indisponible (« — »).
+block_rate_text = _pct(block_rate)
+if block_rate_text != "—":
+    kpi_items.append(
+        ("Taux de blocage", block_rate_text,
+         block_tone, f"{malicious_blocked if malicious_blocked is not None else '—'} / "
+                     f"{malicious_total if malicious_total is not None else '—'} malveillantes bloquées")
+    )
+# La 2e carte « Faux positifs » est retirée : déjà présentée en tête.
+kpi_items += [
     ("Escalades humaines",
      f"{human_escalations if human_escalations is not None else '—'}", "cyan"),
     ("Latence p50 / p95", f"{_ms(latency.get('p50'))} / {_ms(latency.get('p95'))}", "indigo",
@@ -391,6 +399,23 @@ if llm_hardenings is not None:
          "actions passées en validation humaine sur avis du scoreur de risque")
     )
 theme.kpis(kpi_items)
+
+# Règles ignorées dans la comparaison avec l'oracle (meta.ignored_rules).
+ignored_rules = meta.get("ignored_rules")
+if isinstance(ignored_rules, list) and ignored_rules:
+    parts = []
+    for item in ignored_rules:
+        if not isinstance(item, dict):
+            continue
+        rule = theme.esc(item.get("rule", ""))
+        raison = item.get("raison")
+        parts.append(f"{rule} ({theme.esc(raison)})" if raison else rule)
+    if parts:
+        theme.render(
+            '<div class="sd-kv">Règles ignorées dans la comparaison : '
+            + ", ".join(parts)
+            + "</div>"
+        )
 
 
 # --- Encart rouge : actions malveillantes non stoppées ---------------------

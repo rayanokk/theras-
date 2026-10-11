@@ -219,3 +219,52 @@ def test_corrections_text_is_html_escaped(monkeypatch, tmp_path):
     html = _run(monkeypatch, tmp_path, data)
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;" in html
+
+
+# --- Nettoyage d'affichage des KPI ----------------------------------------
+
+def test_scenarios_card_renamed(monkeypatch, tmp_path):
+    html = _run(monkeypatch, tmp_path, _base())
+    assert "Scénarios sans écart de règles" in html
+    assert "Scénarios réussis" not in html
+    assert "verdict correct, mais règles citées différentes de l’oracle pour les autres" in html
+
+
+def test_block_rate_card_shown_when_available(monkeypatch, tmp_path):
+    data = _base()
+    data["metrics"]["block_rate"] = 0.9
+    html = _run(monkeypatch, tmp_path, data)
+    assert "Taux de blocage" in html
+
+
+def test_block_rate_card_hidden_when_unavailable(monkeypatch, tmp_path):
+    data = _base()
+    data["metrics"].pop("block_rate", None)
+    html = _run(monkeypatch, tmp_path, data)
+    assert "Taux de blocage" not in html
+
+
+def test_second_false_positives_card_removed(monkeypatch, tmp_path):
+    # « Faux positifs » n'apparaît qu'une fois (la carte de tête), plus en 2e ligne.
+    html = _run(monkeypatch, tmp_path, _base())
+    assert html.count("Faux positifs") == 1
+
+
+def test_ignored_rules_line_shown_and_escaped(monkeypatch, tmp_path):
+    data = _base()
+    data["meta"]["ignored_rules"] = [
+        {"rule": "R-REV-04", "raison": "durcissement probabiliste <non prédictible>"},
+    ]
+    html = _run(monkeypatch, tmp_path, data)
+    assert "Règles ignorées dans la comparaison" in html
+    assert "R-REV-04" in html
+    # La raison est présente et échappée.
+    assert "&lt;non prédictible&gt;" in html
+    assert "<non prédictible>" not in html
+
+
+def test_ignored_rules_line_absent_when_missing(monkeypatch, tmp_path):
+    data = _base()
+    data["meta"].pop("ignored_rules", None)
+    html = _run(monkeypatch, tmp_path, data)
+    assert "Règles ignorées dans la comparaison" not in html
