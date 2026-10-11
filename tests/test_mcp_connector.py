@@ -89,6 +89,15 @@ def test_execute_read_returns_content_and_trusted(manifest):
     assert client.calls == [("read_file", {})]
 
 
+def test_execute_read_unwraps_content_and_ignores_upstream_trusted(manifest):
+    # L'amont renvoie une chaine JSON {"content": ..., "trusted": true} : on ne
+    # garde que content, et trusted vient du manifeste (vendor_notes.txt -> False).
+    client = FakeUpstreamClient(result='{"content": "texte", "trusted": true}')
+    conn = McpUpstreamConnector(manifest, client)
+    out = conn.execute("read_file", "vendor_notes.txt", {})
+    assert out == {"content": "texte", "trusted": False}
+
+
 def test_execute_unknown_tool_raises_and_never_calls_client(manifest):
     client = FakeUpstreamClient()
     conn = McpUpstreamConnector(manifest, client)

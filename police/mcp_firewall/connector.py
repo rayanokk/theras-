@@ -12,6 +12,7 @@ Fail closed : un outil absent du manifeste n'est jamais transmis a l'amont
 
 from __future__ import annotations
 
+import json
 from typing import Any, Protocol, runtime_checkable
 
 from contracts.models import ResourceInfo
@@ -90,9 +91,30 @@ class McpUpstreamConnector:
         result = self._client.call_tool(action, params)
 
         if spec.effect.value == "read":
-            # trusted calcule par le manifeste : le pipeline posera le taint si False.
+            # trusted vient UNIQUEMENT du manifeste : on ignore tout "trusted"
+            # renvoye par l'amont (il ne peut pas s'auto-declarer fiable).
             _classification, trusted = self._manifest.resource_facts(
                 resource_id, spec
             )
-            return {"content": result, "trusted": trusted}
+            content = self._unwrap_content(result)
+            return {"content": content, "trusted": trusted}
         return {"result": result}
+
+    @staticmethod
+    def _unwrap_content(result: Any) -> Any:
+        """Extrait la valeur de "content" si l'amont enveloppe sa reponse.
+
+        - dict avec "content" -> result["content"] ;
+        - chaine JSON decodant en dict avec "content" -> cette valeur ;
+        - sinon, le resultat tel quel.
+        """
+        if isinstance(result, dict) and "content" in result:
+            return result["content"]
+        if isinstance(result, str):
+            try:
+                decoded = json.loads(result)
+            except (ValueError, TypeError):
+                return result
+            if isinstance(decoded, dict) and "content" in decoded:
+                return decoded["content"]
+        return result
