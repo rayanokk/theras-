@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import sys
 import time
 import uuid
@@ -166,24 +167,108 @@ def fetch_upstream_schemas(
     return schemas
 
 
-def _strip_descriptions(value: Any) -> Any:
-    """Retire récursivement les champs de texte libre d'un JSON Schema amont
-    (``description``, ``title``, ``$comment``).
+class SchemaRejected(ValueError):
+    """Le schéma amont viole une règle anti-injection : l'outil n'est pas exposé."""
 
-    Anti tool poisoning : ces champs sont du texte non fiable fourni par un
-    serveur tiers et peuvent cacher des instructions destinées à l'agent, y
-    compris à l'intérieur du schéma. On ne garde que la STRUCTURE (type,
-    properties, required, enum...), qui sert à valider la forme des arguments.
+
+# Liste BLANCHE des mots-clés de schéma conservés (à tous les niveaux). Tout le
+# reste (description, title, examples, default, $comment, $ref...) est supprimé.
+_ALLOWED_SCHEMA_KEYS = frozenset(
+    {
+        "type",
+        "properties",
+        "required",
+        "enum",
+        "items",
+        "additionalProperties",
+        "anyOf",
+        "oneOf",
+        "allOf",
+    }
+)
+
+# Un nom d'argument sûr : lettre/underscore puis lettres/chiffres/underscore.
+_ARG_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,40}$")
+
+# Bornes sur les valeurs d'enum de type chaîne.
+_MAX_ENUM_STR_LEN = 64
+
+
+def _truncate(text: str, limit: int = 40) -> str:
+    """Tronque un texte pour un log, sans recopier tout le contenu fautif."""
+    text = str(text)
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def sanitize_schema(schema: Any) -> dict:
+    """Nettoie et valide un JSON Schema amont par LISTE BLANCHE (fonction pure).
+
+    Ne garde que les mots-clés structurels de ``_ALLOWED_SCHEMA_KEYS`` à tous les
+    niveaux ; supprime tout texte libre (description, title, examples, default,
+    $comment...), qui est un vecteur de « tool poisoning ».
+
+    Sous ``properties``, les clés sont des NOMS D'ARGUMENTS (pas des mots-clés) :
+    on les conserve et on nettoie récursivement leur valeur. Idem pour chaque
+    élément de ``anyOf``/``oneOf``/``allOf``, pour ``items`` et pour
+    ``additionalProperties`` quand c'est un objet.
+
+    Validation anti-injection (lève SchemaRejected) :
+      - chaque nom d'argument respecte ^[A-Za-z_][A-Za-z0-9_]{0,40}$ ;
+      - chaque valeur d'enum de type str fait <= 64 caractères et ne contient
+        ni \\n ni \\r.
+
+    Ne modifie JAMAIS l'objet d'origine : construit une structure neuve.
     """
-    if isinstance(value, dict):
-        return {
-            k: _strip_descriptions(v)
-            for k, v in value.items()
-            if k not in ("description", "title", "$comment")
-        }
-    if isinstance(value, list):
-        return [_strip_descriptions(v) for v in value]
-    return value
+    if not isinstance(schema, dict):
+        # Un schéma non-objet (ex. True/False) est réduit à un objet libre.
+        return {}
+
+    out: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key not in _ALLOWED_SCHEMA_KEYS:
+            continue  # liste noire implicite : tout non-whitelisté est supprimé
+
+        if key == "properties":
+            if not isinstance(value, dict):
+                continue
+            props: dict[str, Any] = {}
+            for arg_name, arg_schema in value.items():
+                if not isinstance(arg_name, str) or not _ARG_NAME_RE.match(arg_name):
+                    raise SchemaRejected(
+                        f"nom d'argument invalide « {_truncate(arg_name)} »"
+                    )
+                props[arg_name] = sanitize_schema(arg_schema)
+            out["properties"] = props
+
+        elif key in ("anyOf", "oneOf", "allOf"):
+            if isinstance(value, list):
+                out[key] = [sanitize_schema(v) for v in value]
+
+        elif key == "items":
+            if isinstance(value, list):
+                out[key] = [sanitize_schema(v) for v in value]
+            elif isinstance(value, dict):
+                out[key] = sanitize_schema(value)
+
+        elif key == "additionalProperties":
+            # Peut être un booléen OU un sous-schéma objet.
+            out[key] = sanitize_schema(value) if isinstance(value, dict) else value
+
+        elif key == "enum":
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str) and (
+                        len(item) > _MAX_ENUM_STR_LEN or "\n" in item or "\r" in item
+                    ):
+                        raise SchemaRejected(
+                            f"valeur d'enum suspecte « {_truncate(item)} »"
+                        )
+                out[key] = list(value)
+
+        else:  # type, required : valeurs structurelles recopiées telles quelles.
+            out[key] = value
+
+    return out
 
 
 def _fallback_schema(spec: ToolSpec) -> dict:
@@ -197,12 +282,15 @@ def _fallback_schema(spec: ToolSpec) -> dict:
     if spec.recipient_from:
         properties[spec.recipient_from] = {"type": "string"}
         required.append(spec.recipient_from)
-    return {
-        "type": "object",
-        "properties": properties,
-        "required": required,
-        "additionalProperties": True,
-    }
+    # Passe aussi par la liste blanche, pour une seule forme de schéma partout.
+    return sanitize_schema(
+        {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": True,
+        }
+    )
 
 
 class FacadeCore:
@@ -300,12 +388,22 @@ class FacadeCore:
         for display, entry in self._table.items():
             server_schemas = upstream.get(entry.server) or {}
             schema = server_schemas.get(entry.tool)
-            if schema:
-                # On garde la STRUCTURE du schéma amont, mais on retire tout texte
-                # libre (description/title) : vecteur de tool poisoning.
-                resolved[display] = _strip_descriptions(schema)
-            else:
+            if schema is None:
+                # Pas de schéma amont : repli manifeste (jamais rejeté).
                 resolved[display] = _fallback_schema(entry.spec)
+                continue
+            try:
+                # Liste blanche + validation anti-injection sur le schéma amont.
+                resolved[display] = sanitize_schema(schema)
+            except SchemaRejected as exc:
+                # Fail closed : l'outil fautif n'est PAS exposé ; les autres oui.
+                # On ne recopie pas le texte fautif en entier (déjà tronqué).
+                logger.warning(
+                    "MCP amont '%s' : outil '%s' non exposé — schéma rejeté (%s)",
+                    entry.server,
+                    entry.tool,
+                    exc,
+                )
         return resolved
 
     # ------------------------------------------------------------------ cycle
@@ -331,11 +429,15 @@ class FacadeCore:
         """
         tools: list[dict] = []
         for display, entry in self._table.items():
+            schema = self._schemas.get(display)
+            if schema is None:
+                # Outil rejeté par sanitize_schema (fail closed) : non exposé.
+                continue
             tools.append(
                 {
                     "name": display,
                     "description": self._describe(entry),
-                    "input_schema": self._schemas[display],
+                    "input_schema": schema,
                 }
             )
         tools.append(
@@ -346,7 +448,8 @@ class FacadeCore:
                     "Theras précédente, par exemple une action en attente d'approbation "
                     "humaine. Argument : action_id (ex. PA-0001)."
                 ),
-                "input_schema": dict(STATUS_TOOL_SCHEMA),
+                # Le schéma interne passe aussi par la liste blanche.
+                "input_schema": sanitize_schema(STATUS_TOOL_SCHEMA),
             }
         )
         return tools
