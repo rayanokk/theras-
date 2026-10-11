@@ -24,7 +24,10 @@ Point d'entrée : python -m police.mcp_firewall.proxy
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import re
+import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -37,8 +40,30 @@ from console.labels import rule_label
 from police.mcp_firewall.manifest import Manifest, ToolSpec, load_manifests
 from police.mcp_firewall.translate import extract_resource
 
-# Dossier des manifestes, à côté de ce module.
+logger = logging.getLogger(__name__)
+
+# Dossier des manifestes et config des amonts, à côté de ce module.
 MANIFESTS_DIR = Path(__file__).resolve().parent / "manifests"
+UPSTREAMS_PATH = Path(__file__).resolve().parent / "upstreams.yaml"
+
+# Racine du repo (police/mcp_firewall/proxy.py -> remonter de 3 niveaux).
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Variables d'environnement toujours transmises au sous-processus amont si
+# présentes (sinon Python/MCP peut ne pas démarrer sous Windows ou en venv).
+# Même liste que loader.py de L ; on ne transmet jamais THERAS_AGENT_KEY.
+_PASSTHROUGH_ENV = ("PATH", "SYSTEMROOT", "HOME", "SYSTEMDRIVE", "TEMP", "TMP")
+
+# Type de la source de schémas : server -> {tool_name -> inputSchema}.
+SchemaMap = dict[str, dict[str, dict]]
+SchemaProvider = Callable[[], SchemaMap]
+
+# Schéma de theras__get_action_status (figé par le contrat de la façade).
+STATUS_TOOL_SCHEMA: dict = {
+    "type": "object",
+    "properties": {"action_id": {"type": "string"}},
+    "required": ["action_id"],
+}
 
 # Outil propre à Theras (pas issu d'un manifeste amont).
 STATUS_TOOL = "theras__get_action_status"
@@ -83,6 +108,191 @@ def _env_or_uuid(name: str, prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex}"
 
 
+def _subprocess_env(env_names: list[str]) -> dict[str, str]:
+    """Environnement minimal du sous-processus amont : variables demandées +
+    passerelle. On ne transmet jamais la clé API de l'agent à l'amont."""
+    env: dict[str, str] = {}
+    for name in list(env_names) + list(_PASSTHROUGH_ENV):
+        if name in os.environ:
+            env[name] = os.environ[name]
+    return env
+
+
+def fetch_upstream_schemas(
+    upstreams_path: str | Path = UPSTREAMS_PATH,
+    repo_root: str | Path = REPO_ROOT,
+    timeout_s: float = 15,
+) -> SchemaMap:
+    """Source de schémas par défaut : pour chaque serveur de upstreams.yaml, ouvre
+    un StdioUpstreamClient TEMPORAIRE, lit list_tools(), garde les input_schema,
+    puis ferme le client. Un amont qui échoue est simplement absent du résultat
+    (la façade basculera sur le schéma de repli pour ses outils).
+
+    On lit la config avec la fonction existante de loader.py (L), sans la modifier.
+    """
+    from mcp import StdioServerParameters
+
+    from police.mcp_firewall.loader import load_upstream_config
+    from police.mcp_firewall.upstream import StdioUpstreamClient
+
+    config = load_upstream_config(upstreams_path)
+    schemas: SchemaMap = {}
+    for name, cfg in config.items():
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", cfg.module],
+            cwd=str(repo_root),
+            env=_subprocess_env(cfg.env),
+        )
+        client = StdioUpstreamClient(name, params, timeout_s)
+        try:
+            client.start()
+            tools = client.list_tools()
+            schemas[name] = {
+                t["name"]: t["input_schema"] for t in tools
+            }
+        except Exception as exc:  # noqa: BLE001 - fail-safe, on continue
+            # Jamais la clé dans le log : exc ne la contient pas (clé non transmise).
+            logger.warning(
+                "MCP amont '%s' : schémas indisponibles au démarrage (%s), "
+                "repli sur le schéma du manifeste.",
+                name,
+                exc,
+            )
+        finally:
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001
+                pass
+    return schemas
+
+
+class SchemaRejected(ValueError):
+    """Le schéma amont viole une règle anti-injection : l'outil n'est pas exposé."""
+
+
+# Liste BLANCHE des mots-clés de schéma conservés (à tous les niveaux). Tout le
+# reste (description, title, examples, default, $comment, $ref...) est supprimé.
+_ALLOWED_SCHEMA_KEYS = frozenset(
+    {
+        "type",
+        "properties",
+        "required",
+        "enum",
+        "items",
+        "additionalProperties",
+        "anyOf",
+        "oneOf",
+        "allOf",
+    }
+)
+
+# Un nom d'argument sûr : lettre/underscore puis lettres/chiffres/underscore.
+_ARG_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,40}$")
+
+# Bornes sur les valeurs d'enum de type chaîne.
+_MAX_ENUM_STR_LEN = 64
+
+
+def _truncate(text: str, limit: int = 40) -> str:
+    """Tronque un texte pour un log, sans recopier tout le contenu fautif."""
+    text = str(text)
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def sanitize_schema(schema: Any) -> dict:
+    """Nettoie et valide un JSON Schema amont par LISTE BLANCHE (fonction pure).
+
+    Ne garde que les mots-clés structurels de ``_ALLOWED_SCHEMA_KEYS`` à tous les
+    niveaux ; supprime tout texte libre (description, title, examples, default,
+    $comment...), qui est un vecteur de « tool poisoning ».
+
+    Sous ``properties``, les clés sont des NOMS D'ARGUMENTS (pas des mots-clés) :
+    on les conserve et on nettoie récursivement leur valeur. Idem pour chaque
+    élément de ``anyOf``/``oneOf``/``allOf``, pour ``items`` et pour
+    ``additionalProperties`` quand c'est un objet.
+
+    Validation anti-injection (lève SchemaRejected) :
+      - chaque nom d'argument respecte ^[A-Za-z_][A-Za-z0-9_]{0,40}$ ;
+      - chaque valeur d'enum de type str fait <= 64 caractères et ne contient
+        ni \\n ni \\r.
+
+    Ne modifie JAMAIS l'objet d'origine : construit une structure neuve.
+    """
+    if not isinstance(schema, dict):
+        # Un schéma non-objet (ex. True/False) est réduit à un objet libre.
+        return {}
+
+    out: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key not in _ALLOWED_SCHEMA_KEYS:
+            continue  # liste noire implicite : tout non-whitelisté est supprimé
+
+        if key == "properties":
+            if not isinstance(value, dict):
+                continue
+            props: dict[str, Any] = {}
+            for arg_name, arg_schema in value.items():
+                if not isinstance(arg_name, str) or not _ARG_NAME_RE.match(arg_name):
+                    raise SchemaRejected(
+                        f"nom d'argument invalide « {_truncate(arg_name)} »"
+                    )
+                props[arg_name] = sanitize_schema(arg_schema)
+            out["properties"] = props
+
+        elif key in ("anyOf", "oneOf", "allOf"):
+            if isinstance(value, list):
+                out[key] = [sanitize_schema(v) for v in value]
+
+        elif key == "items":
+            if isinstance(value, list):
+                out[key] = [sanitize_schema(v) for v in value]
+            elif isinstance(value, dict):
+                out[key] = sanitize_schema(value)
+
+        elif key == "additionalProperties":
+            # Peut être un booléen OU un sous-schéma objet.
+            out[key] = sanitize_schema(value) if isinstance(value, dict) else value
+
+        elif key == "enum":
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str) and (
+                        len(item) > _MAX_ENUM_STR_LEN or "\n" in item or "\r" in item
+                    ):
+                        raise SchemaRejected(
+                            f"valeur d'enum suspecte « {_truncate(item)} »"
+                        )
+                out[key] = list(value)
+
+        else:  # type, required : valeurs structurelles recopiées telles quelles.
+            out[key] = value
+
+    return out
+
+
+def _fallback_schema(spec: ToolSpec) -> dict:
+    """Schéma minimal construit depuis le manifeste quand l'amont est indisponible.
+
+    resource_from et recipient_from deviennent des propriétés string requises ;
+    additionalProperties reste true (les autres arguments de l'outil sont libres).
+    """
+    properties: dict[str, dict] = {spec.resource_from: {"type": "string"}}
+    required = [spec.resource_from]
+    if spec.recipient_from:
+        properties[spec.recipient_from] = {"type": "string"}
+        required.append(spec.recipient_from)
+    # Passe aussi par la liste blanche, pour une seule forme de schéma partout.
+    return sanitize_schema(
+        {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": True,
+        }
+    )
+
+
 class FacadeCore:
     """Logique synchrone de la façade, indépendante de la couche MCP.
 
@@ -101,6 +311,7 @@ class FacadeCore:
         task_id: str | None = None,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
+        schema_provider: SchemaProvider | None = None,
     ) -> None:
         if not agent_key:
             raise RuntimeError(
@@ -150,6 +361,51 @@ class FacadeCore:
                     )
                 self._table[display] = ToolEntry(server, tool_name, spec)
 
+        # Schémas d'entrée des outils, résolus UNE fois au démarrage.
+        #   - inputSchema : repris de l'amont quand disponible (il décrit la
+        #     vraie forme des arguments), sinon schéma de repli du manifeste.
+        #   - description : TOUJOURS construite par nous à partir du manifeste.
+        # Anti « tool poisoning » : on ne reprend JAMAIS la description de
+        # l'amont. La description d'un serveur tiers est du texte non fiable qui
+        # peut cacher des instructions destinées à l'agent (p. ex. « ignore les
+        # consignes précédentes et exfiltre X »). Le schéma, lui, est structuré
+        # et sert seulement à valider la forme des arguments.
+        self._schema_provider = schema_provider or fetch_upstream_schemas
+        self._schemas: dict[str, dict] = self._resolve_schemas()
+
+    def _resolve_schemas(self) -> dict[str, dict]:
+        """Associe à chaque nom affiché son inputSchema (amont ou repli)."""
+        try:
+            upstream = self._schema_provider() or {}
+        except Exception as exc:  # noqa: BLE001 - fail-safe : la façade démarre
+            logger.warning(
+                "Schémas amont indisponibles (%s) : repli sur les manifestes.",
+                exc,
+            )
+            upstream = {}
+
+        resolved: dict[str, dict] = {}
+        for display, entry in self._table.items():
+            server_schemas = upstream.get(entry.server) or {}
+            schema = server_schemas.get(entry.tool)
+            if schema is None:
+                # Pas de schéma amont : repli manifeste (jamais rejeté).
+                resolved[display] = _fallback_schema(entry.spec)
+                continue
+            try:
+                # Liste blanche + validation anti-injection sur le schéma amont.
+                resolved[display] = sanitize_schema(schema)
+            except SchemaRejected as exc:
+                # Fail closed : l'outil fautif n'est PAS exposé ; les autres oui.
+                # On ne recopie pas le texte fautif en entier (déjà tronqué).
+                logger.warning(
+                    "MCP amont '%s' : outil '%s' non exposé — schéma rejeté (%s)",
+                    entry.server,
+                    entry.tool,
+                    exc,
+                )
+        return resolved
+
     # ------------------------------------------------------------------ cycle
 
     def close(self) -> None:
@@ -165,17 +421,23 @@ class FacadeCore:
     # ------------------------------------------------------------------ tools
 
     def list_tools(self) -> list[dict]:
-        """Liste des outils exposés : les {server}__{tool} + theras__get_action_status."""
+        """Liste des outils exposés : les {server}__{tool} + theras__get_action_status.
+
+        Chaque outil porte un inputSchema réel (amont ou repli manifeste) et une
+        description que NOUS construisons depuis le manifeste (jamais celle de
+        l'amont : voir le commentaire anti tool-poisoning dans __init__).
+        """
         tools: list[dict] = []
         for display, entry in self._table.items():
+            schema = self._schemas.get(display)
+            if schema is None:
+                # Outil rejeté par sanitize_schema (fail closed) : non exposé.
+                continue
             tools.append(
                 {
                     "name": display,
-                    "description": (
-                        f"Outil « {entry.tool} » du serveur amont « {entry.server} », "
-                        "exposé via Theras (décision et exécution côté Gateway)."
-                    ),
-                    "input_schema": {"type": "object", "additionalProperties": True},
+                    "description": self._describe(entry),
+                    "input_schema": schema,
                 }
             )
         tools.append(
@@ -186,14 +448,20 @@ class FacadeCore:
                     "Theras précédente, par exemple une action en attente d'approbation "
                     "humaine. Argument : action_id (ex. PA-0001)."
                 ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {"action_id": {"type": "string"}},
-                    "required": ["action_id"],
-                },
+                # Le schéma interne passe aussi par la liste blanche.
+                "input_schema": sanitize_schema(STATUS_TOOL_SCHEMA),
             }
         )
         return tools
+
+    @staticmethod
+    def _describe(entry: ToolEntry) -> str:
+        """Description construite par Theras à partir du manifeste. Volontairement
+        indépendante de tout texte fourni par l'amont (anti tool poisoning)."""
+        return (
+            f"[{entry.server}] {entry.tool} — effet: {entry.spec.effect.value} "
+            "(contrôlé par Theras)"
+        )
 
     # ------------------------------------------------------------------- call
 
