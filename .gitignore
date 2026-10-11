@@ -225,10 +225,12 @@ __marimo__/
 *.db
 *.sqlite3
 !.env.example
-bench/results/
 datagen/cache/
 
 datagen/cache/
-bench/results/
 Claudeforgemcp.pdf
 Theras_v2_Plan_MCP_Forge.docx
+
+bench/results/results_*.json
+
+bench/results/results_*.json
