@@ -12,8 +12,19 @@ from pathlib import Path
 import httpx
 import pytest
 
-from police.mcp_firewall.manifest import load_manifests
+from police.mcp_firewall.manifest import Manifest, load_manifests
 from police.mcp_firewall.proxy import STATUS_TOOL, FacadeCore, build_core_from_env
+
+
+def _manifest(server: str, tools: list[str]) -> Manifest:
+    """Petit manifeste valide : chaque outil est un simple 'read' sur 'path'."""
+    return Manifest.model_validate(
+        {
+            "server": server,
+            "acl": ["agent-assistant"],
+            "tools": {name: {"effect": "read", "resource_from": "path"} for name in tools},
+        }
+    )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFESTS_DIR = REPO_ROOT / "police" / "mcp_firewall" / "manifests"
@@ -63,6 +74,34 @@ def test_list_tools_exposes_server__tool_and_status():
     assert "demo_drive__read_file" in names
     assert STATUS_TOOL in names
     core.close()
+
+
+# ----------------------------------------------------- garde-fou de collision
+
+
+def test_display_name_collision_refuses_to_start():
+    # ("ab__cd", "ef") et ("ab", "cd__ef") produisent tous deux "ab__cd__ef".
+    # (Les noms de serveur doivent faire >= 2 caractères, cf. manifest.py.)
+    manifests = {
+        "ab__cd": _manifest("ab__cd", ["ef"]),
+        "ab": _manifest("ab", ["cd__ef"]),
+    }
+    with pytest.raises(RuntimeError) as exc:
+        FacadeCore(GATEWAY_URL, AGENT_KEY, manifests)
+    msg = str(exc.value)
+    # L'erreur cite les deux couples et le nom en conflit.
+    assert "ab__cd__ef" in msg
+    assert "'ab__cd'" in msg and "'ef'" in msg
+    assert "'ab'" in msg and "'cd__ef'" in msg
+
+
+def test_tool_named_like_status_tool_refuses_to_start():
+    # Un outil ("theras", "get_action_status") entrerait en conflit avec l'outil
+    # interne theras__get_action_status.
+    manifests = {"theras": _manifest("theras", ["get_action_status"])}
+    with pytest.raises(RuntimeError) as exc:
+        FacadeCore(GATEWAY_URL, AGENT_KEY, manifests)
+    assert STATUS_TOOL in str(exc.value)
 
 
 # --------------------------------------------------------------------- routing

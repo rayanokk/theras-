@@ -124,10 +124,30 @@ class FacadeCore:
 
         # Table nom affiché -> (server, tool, spec). On ne redécoupe jamais le
         # nom pour retrouver le serveur : on consulte cette table.
+        #
+        # Garde-fou de collision : comme le séparateur "__" peut aussi apparaître
+        # dans un nom de serveur ou d'outil, deux couples (server, tool) distincts
+        # peuvent produire le même nom affiché (p. ex. ("a__b", "c") et
+        # ("a", "b__c") -> "a__b__c"). On refuse de démarrer plutôt que d'écraser
+        # silencieusement une entrée. On réserve aussi le nom de l'outil Theras.
         self._table: dict[str, ToolEntry] = {}
         for server, manifest in self._manifests.items():
             for tool_name, spec in manifest.tools.items():
                 display = f"{server}{_SEP}{tool_name}"
+                if display == STATUS_TOOL:
+                    raise RuntimeError(
+                        f"Nom d'outil affiché réservé : l'outil ({server!r}, "
+                        f"{tool_name!r}) produit « {STATUS_TOOL} », qui est "
+                        "l'outil interne de Theras. Renomme l'outil amont."
+                    )
+                existing = self._table.get(display)
+                if existing is not None:
+                    raise RuntimeError(
+                        "Collision de nom d'outil affiché « "
+                        f"{display} » : les couples ({existing.server!r}, "
+                        f"{existing.tool!r}) et ({server!r}, {tool_name!r}) "
+                        "produisent le même nom. Renomme un serveur ou un outil."
+                    )
                 self._table[display] = ToolEntry(server, tool_name, spec)
 
     # ------------------------------------------------------------------ cycle

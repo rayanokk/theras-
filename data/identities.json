@@ -4,13 +4,19 @@
       "id": "agent-research",
       "type": "agent",
       "key_env": "AGENT_KEY_RESEARCH",
-      "allowed": {"google_drive": ["read_file", "list_files"]}
+      "allowed": {
+        "google_drive": ["read_file", "list_files"],
+        "demo_drive": ["read_file", "list_files"]
+      }
     },
     {
       "id": "agent-ops",
       "type": "agent",
       "key_env": "AGENT_KEY_OPS",
-      "allowed": {"google_drive": ["read_file", "list_files", "share_file", "delete_file"]}
+      "allowed": {
+        "google_drive": ["read_file", "list_files", "share_file", "delete_file"],
+        "demo_drive": ["read_file", "list_files", "share_file", "delete_file"]
+      }
     },
     {
       "id": "agent-assistant",
@@ -18,7 +24,8 @@
       "key_env": "AGENT_KEY_ASSISTANT",
       "allowed": {
         "google_drive": ["read_file", "list_files", "share_file"],
-        "mail": ["send_email"]
+        "mail": ["send_email"],
+        "demo_drive": ["read_file", "list_files", "share_file", "send_email"]
       }
     },
     {

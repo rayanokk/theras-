@@ -96,6 +96,41 @@ def test_identities_fields_match_type(identities):
             pytest.fail(f"Type d'identité inconnu pour {ident['id']} : {itype}")
 
 
+def _allowed_by_id(identities):
+    return {
+        ident["id"]: ident.get("allowed", {})
+        for ident in identities
+        if ident["type"] == "agent"
+    }
+
+
+def test_demo_drive_rights_match_existing_rights(identities):
+    """Chaque agent a sur demo_drive les mêmes droits (actions canoniques) que
+    ceux qu'il possède déjà via google_drive / mail. Aucun droit en plus."""
+    allowed = _allowed_by_id(identities)
+    expected = {
+        "agent-research": ["list_files", "read_file"],
+        "agent-ops": ["delete_file", "list_files", "read_file", "share_file"],
+        "agent-assistant": ["list_files", "read_file", "send_email", "share_file"],
+    }
+    for agent_id, expected_tools in expected.items():
+        demo = allowed[agent_id].get("demo_drive")
+        assert demo is not None, f"{agent_id} doit avoir des droits sur demo_drive"
+        assert sorted(demo) == expected_tools, (
+            f"{agent_id} : droits demo_drive {sorted(demo)}, attendu {expected_tools}"
+        )
+
+
+def test_agent_research_denied_sensitive_demo_drive_tools(identities):
+    """agent-research n'a NI share_file, NI delete_file, NI send_email sur demo_drive."""
+    allowed = _allowed_by_id(identities)
+    demo = allowed["agent-research"].get("demo_drive", [])
+    for forbidden in ("share_file", "delete_file", "send_email"):
+        assert forbidden not in demo, (
+            f"agent-research ne doit pas avoir '{forbidden}' sur demo_drive"
+        )
+
+
 def test_seed_matches_expected_table(_drive):
     """Le seed contient exactement les 15 resource_id attendus, avec les bons attributs."""
     actual = {
