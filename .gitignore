@@ -226,3 +226,4 @@ __marimo__/
 *.sqlite3
 !.env.example
 bench/results/
+datagen/cache/
