@@ -11,9 +11,13 @@ import streamlit as st
 
 from console import theme
 from console.bench_view import (
+    corrections,
     default_results_path,
     example_results_path,
+    failed_malicious_scenarios,
     load_results,
+    metric,
+    ratio_parts,
     summarize,
 )
 
@@ -182,7 +186,42 @@ KNOWN_METRIC_KEYS = {
     "legit_total", "false_positives", "false_positive_rate",
     "human_escalations", "latency_ms",
     "evidence_chain_valid", "evidence_broken_at",
+    "effectiveness", "explainability", "corrections",
 }
+
+
+# --- KPI de tête : efficacité, explicabilité, faux positifs ----------------
+def _ratio_kpi(label: str, parts: dict | None, subtitle: str) -> tuple:
+    """Carte KPI « num / total (pct) » ; vert si 100 %, rouge sinon, — si absent."""
+    if parts is None:
+        return (label, "—", "neutral", subtitle)
+    num, total, pct = parts["num"], parts["total"], parts["pct"]
+    if pct is None:
+        value, tone = f"{num} / {total}", "neutral"
+    else:
+        value = f"{num} / {total} ({pct * 100:.0f} %)"
+        tone = "green" if pct >= 0.999 else "red"
+    return (label, value, tone, subtitle)
+
+
+eff_parts = ratio_parts(metric(results, "effectiveness"))
+exp_parts = ratio_parts(metric(results, "explainability"))
+fp_head = metric(results, "false_positives")
+fp_head_tone = "green" if not fp_head else "red"
+legit_head = metric(results, "legit_total")
+
+theme.kpis(
+    [
+        _ratio_kpi("Efficacité", eff_parts, "actions malveillantes stoppées (bon verdict)"),
+        _ratio_kpi("Explicabilité", exp_parts, "règles déclenchées exactement celles attendues"),
+        (
+            "Faux positifs",
+            f"{fp_head if fp_head is not None else '—'}",
+            fp_head_tone,
+            f"sur {legit_head if legit_head is not None else '—'} légitimes",
+        ),
+    ]
+)
 
 # Durcissements LLM : on accepte plusieurs orthographes possibles côté bench.
 LLM_HARDENING_KEYS = ("llm_hardenings", "llm_hardening", "hardenings")
@@ -214,6 +253,69 @@ if llm_hardenings is not None:
          "actions passées en validation humaine sur avis du scoreur de risque")
     )
 theme.kpis(kpi_items)
+
+
+# --- Encart rouge : actions malveillantes non stoppées ---------------------
+if eff_parts is not None and eff_parts["num"] < eff_parts["total"]:
+    missed = eff_parts["total"] - eff_parts["num"]
+    failed = failed_malicious_scenarios(results)
+    lines = [
+        '<div class="sd-card sd-red sd-toned">'
+        '<div class="sd-state-t">'
+        f"{theme.esc(missed)} action(s) malveillante(s) non stoppée(s)</div>"
+        '<div class="sd-state-d">Verdict obtenu différent du verdict attendu '
+        "sur ces scénarios.</div>"
+    ]
+    if failed:
+        rows = []
+        for sc in failed:
+            steps_txt = "; ".join(
+                f'{theme.esc(s["action"])} {theme.esc(s["resource"])} : '
+                f'attendu {theme.esc(s["attendu"])}, '
+                f'obtenu <span class="sd-diff">{theme.esc(s["obtenu"])}</span>'
+                for s in sc["steps"]
+            )
+            rows.append(
+                '<div class="sd-rule">'
+                f'<span class="sd-tag sd-mono">{theme.esc(sc["id"])}</span>'
+                f"<span>{steps_txt}</span></div>"
+            )
+        lines.append('<div style="margin-top:10px;">' + "".join(rows) + "</div>")
+    else:
+        lines.append(
+            '<div class="sd-kv">Le détail par scénario n’est pas présent dans ce '
+            "fichier de résultats.</div>"
+        )
+    lines.append("</div>")
+    theme.render("".join(lines))
+
+
+# --- Attendus corrigés -----------------------------------------------------
+theme.section(
+    "Attendus corrigés",
+    "Toute correction d’un attendu après le run est publiée ici avec sa raison. "
+    "On ne maquille rien.",
+)
+_corrections = corrections(results)
+if not _corrections:
+    theme.render('<div class="sd-muted">Aucune correction.</div>')
+else:
+    head = "".join(
+        f"<th>{theme.esc(h)}</th>" for h in ("Scénario", "Avant", "Après", "Raison")
+    )
+    body = "".join(
+        "<tr>"
+        f'<td class="sd-mono sd-nw">{theme.esc(c["scenario"])}</td>'
+        f'<td class="sd-mono">{theme.esc(c["avant"])}</td>'
+        f'<td class="sd-mono">{theme.esc(c["apres"])}</td>'
+        f'<td>{theme.esc(c["raison"])}</td>'
+        "</tr>"
+        for c in _corrections
+    )
+    theme.render(
+        '<div class="sd-table-wrap"><table class="sd-table">'
+        f"<thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>"
+    )
 
 
 # --- Autres mesures (champs inconnus de metrics) ---------------------------

@@ -2,7 +2,14 @@
 
 from pathlib import Path
 
-from console.bench_view import load_results, summarize
+from console.bench_view import (
+    corrections,
+    failed_malicious_scenarios,
+    load_results,
+    metric,
+    ratio_parts,
+    summarize,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE = REPO_ROOT / "bench" / "results" / "EXAMPLE_results.json"
@@ -61,3 +68,88 @@ def test_summarize_handles_none_and_partial():
     assert summary["total"] == 2
     assert summary["ok"] == 1
     assert summary["ko"] == 1  # scénario sans result compte comme KO
+
+
+# --- metric() : metrics[key] puis racine en repli -------------------------
+
+def test_metric_reads_from_metrics_first():
+    results = {"metrics": {"effectiveness": {"stopped": 3}}, "effectiveness": "racine"}
+    assert metric(results, "effectiveness") == {"stopped": 3}
+
+
+def test_metric_falls_back_to_root():
+    results = {"metrics": {"autre": 1}, "false_positives": 2}
+    assert metric(results, "false_positives") == 2
+
+
+def test_metric_missing_returns_default():
+    assert metric({"metrics": {}}, "absent") is None
+    assert metric({"metrics": {}}, "absent", "x") == "x"
+    assert metric(None, "absent", 0) == 0
+
+
+# --- ratio_parts() --------------------------------------------------------
+
+def test_ratio_parts_stopped_total():
+    parts = ratio_parts({"stopped": 12, "total": 18})
+    assert parts == {"num": 12, "total": 18, "pct": 12 / 18}
+
+
+def test_ratio_parts_exact_total_full():
+    parts = ratio_parts({"exact": 30, "total": 30})
+    assert parts["pct"] == 1.0
+
+
+def test_ratio_parts_zero_total_pct_none():
+    parts = ratio_parts({"stopped": 0, "total": 0})
+    assert parts["pct"] is None
+
+
+def test_ratio_parts_invalid_returns_none():
+    assert ratio_parts(None) is None
+    assert ratio_parts({"total": 5}) is None  # pas de numérateur
+    assert ratio_parts({"stopped": 3}) is None  # pas de total
+    assert ratio_parts("nope") is None
+
+
+# --- corrections() --------------------------------------------------------
+
+def test_corrections_normalizes_lists_and_strings():
+    results = {
+        "metrics": {
+            "corrections": [
+                {"scenario": "S-X", "avant": ["R-REV-01"], "apres": ["R-REV-01", "R-REV-02"], "raison": "oubli"},
+                {"scenario": "S-Y", "avant": "ALLOW", "apres": "REVIEW", "raison": "taint"},
+            ]
+        }
+    }
+    out = corrections(results)
+    assert len(out) == 2
+    assert out[0]["avant"] == "R-REV-01"
+    assert out[0]["apres"] == "R-REV-01, R-REV-02"
+    assert out[1]["avant"] == "ALLOW"
+    assert out[1]["raison"] == "taint"
+
+
+def test_corrections_absent_returns_empty():
+    assert corrections({"metrics": {}}) == []
+    assert corrections(None) == []
+    assert corrections({"metrics": {"corrections": "pasuneliste"}}) == []
+
+
+# --- failed_malicious_scenarios() -----------------------------------------
+
+def test_failed_malicious_scenarios_from_example():
+    # L'exemple contient des étapes où obtenu ≠ attendu (ex. S-INJ-04).
+    failed = failed_malicious_scenarios(load_results(EXAMPLE))
+    ids = {s["id"] for s in failed}
+    assert "S-INJ-04" in ids  # ALLOW obtenu ≠ REVIEW attendu
+    for s in failed:
+        assert s["steps"]
+        for step in s["steps"]:
+            assert step["attendu"] != step["obtenu"]
+
+
+def test_failed_malicious_scenarios_no_scenarios():
+    assert failed_malicious_scenarios({"metrics": {}}) == []
+    assert failed_malicious_scenarios(None) == []

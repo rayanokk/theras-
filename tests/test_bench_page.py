@@ -152,3 +152,70 @@ def test_falls_back_to_example_when_nothing_present(monkeypatch, tmp_path):
     # Dossier vide, aucun fichier reconnu : repli sur l'exemple + bandeau ambre.
     _, html = _run_env(monkeypatch, tmp_path / "absent.json")
     assert "Donn\u00e9es d\u2019exemple" in html
+
+
+# --- Efficacité / Explicabilité / Attendus corrigés -----------------------
+
+def test_effectiveness_explainability_kpis_shown(monkeypatch, tmp_path):
+    data = _base()
+    data["metrics"]["effectiveness"] = {"stopped": 18, "total": 18}
+    data["metrics"]["explainability"] = {"exact": 24, "total": 30}
+    html = _run(monkeypatch, tmp_path, data)
+    assert "Efficacité" in html
+    assert "18 / 18 (100 %)" in html
+    assert "actions malveillantes stoppées (bon verdict)" in html
+    assert "Explicabilité" in html
+    assert "24 / 30 (80 %)" in html
+    assert "règles déclenchées exactement celles attendues" in html
+
+
+def test_ratio_kpis_show_dash_when_absent(monkeypatch, tmp_path):
+    data = _base()
+    data["metrics"].pop("effectiveness", None)
+    data["metrics"].pop("explainability", None)
+    html = _run(monkeypatch, tmp_path, data)
+    # Les cartes existent, avec « — » comme valeur.
+    assert "Efficacité" in html
+    assert "Explicabilité" in html
+
+
+def test_corrections_table_shown(monkeypatch, tmp_path):
+    data = _base()
+    data["metrics"]["corrections"] = [
+        {"scenario": "S-INJ-03", "avant": ["R-REV-03"],
+         "apres": ["R-REV-02", "R-REV-03"], "raison": "taint oublié"},
+    ]
+    html = _run(monkeypatch, tmp_path, data)
+    assert "Attendus corrigés" in html
+    assert "On ne maquille rien" in html
+    assert "S-INJ-03" in html
+    assert "taint oublié" in html
+    assert "R-REV-02, R-REV-03" in html
+
+
+def test_corrections_empty_message(monkeypatch, tmp_path):
+    data = _base()
+    data["metrics"].pop("corrections", None)
+    html = _run(monkeypatch, tmp_path, data)
+    assert "Attendus corrigés" in html
+    assert "Aucune correction." in html
+
+
+def test_missed_malicious_red_box_lists_scenarios(monkeypatch, tmp_path):
+    data = _base()
+    data["metrics"]["effectiveness"] = {"stopped": 16, "total": 18}
+    html = _run(monkeypatch, tmp_path, data)
+    assert "non stopp" in html  # « non stoppée(s) »
+    # Détail tiré des scénarios de l'exemple (ex. S-INJ-04 : ALLOW ≠ REVIEW).
+    assert "S-INJ-04" in html
+
+
+def test_corrections_text_is_html_escaped(monkeypatch, tmp_path):
+    data = _base()
+    data["metrics"]["corrections"] = [
+        {"scenario": "S-X", "avant": "a", "apres": "b",
+         "raison": "<script>alert(1)</script>"},
+    ]
+    html = _run(monkeypatch, tmp_path, data)
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;" in html
